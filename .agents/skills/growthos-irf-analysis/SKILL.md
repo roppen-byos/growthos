@@ -1,6 +1,6 @@
 ---
 name: growthos-irf-analysis
-description: Answer GrowthOS IRF questions: master reports, ratio investigations, quarterly monthly trends, city rankings/funnels, service-share drivers, and current-data verification.
+description: "Answer GrowthOS IRF questions: master reports, ratio investigations, quarterly monthly trends, city rankings/funnels, service-share drivers, and current-data verification."
 ---
 
 # GrowthOS IRF Analysis
