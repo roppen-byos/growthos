@@ -1,0 +1,4 @@
+.env
+.venv
+gwos_analyst.egg-info
+__pycache__

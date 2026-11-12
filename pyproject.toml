@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gwos-analyst"
+version = "0.1.0"
+description = "Read-only IRF analyst CLI (Codex consumer repo)"
+requires-python = ">=3.11"
+dependencies = ["psycopg[binary]>=3.2,<4"]
+
+[project.scripts]
+growthos = "growthos.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["growthos*"]
+
+[tool.setuptools.package-data]
+growthos = ["metric_registry.json", "sql/*.sql"]

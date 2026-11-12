@@ -1,0 +1,275 @@
+{
+  "metrics": {
+    "installs": {
+      "id": "installs",
+      "label": "Installs",
+      "aliases": [
+        "App Installs"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "installations",
+      "display_unit": "installations",
+      "movement_unit": "installations",
+      "definition": "Number of new Rapido app installations in the reporting period. An installation does not necessarily represent a new customer: an existing customer can uninstall and reinstall the app.",
+      "caveats": [
+        "Counts app installations, not unique lifetime people.",
+        "Do not manufacture monthly distincts by summing shorter-period or channel distinct counts."
+      ]
+    },
+    "registrations": {
+      "id": "registrations",
+      "label": "Registrations",
+      "aliases": [
+        "Customer Registrations",
+        "entity_reg"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "customers",
+      "display_unit": "customers",
+      "movement_unit": "customers",
+      "definition": "Number of customers completing their first registration with Rapido in the reporting period. A customer registers only once; reinstalling the app or logging back in does not create another registration.",
+      "caveats": [
+        "Not AppsFlyer af_reg.",
+        "Current month-scoped extraction ranks records within the selected month and does not by itself prove lifetime-first registration or legacy export parity."
+      ]
+    },
+    "platform_ftu": {
+      "id": "platform_ftu",
+      "label": "Platform FTU",
+      "aliases": [
+        "PFTU",
+        "Platform First-Time Users"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "customers",
+      "display_unit": "customers",
+      "movement_unit": "customers",
+      "definition": "Number of customers completing their first-ever Rapido ride in the reporting period. A completed ride has dropped status. A customer becomes a Platform FTU only once, regardless of service.",
+      "caveats": [
+        "Counted independently across services; not the sum of Bike/Link, Auto, and Cab PFTU counts.",
+        "Distinct from Service FTU (SVN), where an existing customer tries another Rapido service for the first time.",
+        "Source platform-new flagging is not independently verified first-dropped-ride proof unless separately certified."
+      ]
+    },
+    "platform_link_ftu": {
+      "id": "platform_link_ftu",
+      "label": "Bike/Link PFTU",
+      "aliases": [
+        "Bike PFTU",
+        "Link PFTU",
+        "Bike/Link FTU"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "customers",
+      "display_unit": "customers",
+      "movement_unit": "customers",
+      "service_membership": [
+        "Link",
+        "Bike Lite",
+        "Bike Pink",
+        "Bike Metro",
+        "Scooty",
+        "Scooty Lite",
+        "Bike Rated by Women"
+      ],
+      "definition": "Number of customers whose first-ever completed Rapido ride in the reporting period was on an approved Bike/Link service.",
+      "caveats": [
+        "Measures first-ever Rapido ride on Bike/Link (PFTU), not Bike/Link Service FTU (SVN).",
+        "Approved membership spans the seven Bike/Link services; 2026-09 and 2026-10 accepted a coarse Link category proxy under DEC-008, which does not prove seven-service measurement or certify other months."
+      ]
+    },
+    "platform_auto_ftu": {
+      "id": "platform_auto_ftu",
+      "label": "Auto PFTU",
+      "aliases": [
+        "Auto First-Time Users"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "customers",
+      "display_unit": "customers",
+      "movement_unit": "customers",
+      "definition": "Number of customers whose first-ever completed Rapido ride in the reporting period was on Auto.",
+      "caveats": [
+        "Measures first-ever Rapido ride on Auto (PFTU), not Auto Service FTU (SVN) from existing Bike or Cab customers."
+      ]
+    },
+    "platform_cab_ftu": {
+      "id": "platform_cab_ftu",
+      "label": "Cab PFTU",
+      "aliases": [
+        "Cab First-Time Users"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "customers",
+      "display_unit": "customers",
+      "movement_unit": "customers",
+      "definition": "Number of customers whose first-ever completed Rapido ride in the reporting period was on Cab. Cab excludes c2c.",
+      "caveats": [
+        "Measures first-ever Rapido ride on Cab (PFTU), not Cab Service FTU (SVN) from existing Bike or Auto customers.",
+        "Excludes c2c, while unselected services still count in independent Platform FTU when platform-new."
+      ]
+    },
+    "i2r": {
+      "id": "i2r",
+      "label": "Install-to-Registration Ratio",
+      "aliases": [
+        "I2R"
+      ],
+      "kind": "ratio",
+      "unit": "fraction",
+      "display_unit": "percent",
+      "movement_unit": "percentage_points",
+      "numerator": "registrations",
+      "denominator": "installs",
+      "formula": "registrations / installs",
+      "definition": "Registrations relative to app installations in the same reporting period.",
+      "caveats": [
+        "Compares period totals, not a matched install cohort; do not cap at 100%.",
+        "Aggregate approved counts before dividing; never average city ratios."
+      ]
+    },
+    "r2n": {
+      "id": "r2n",
+      "label": "Registration-to-PFTU Ratio",
+      "aliases": [
+        "R2N"
+      ],
+      "kind": "ratio",
+      "unit": "fraction",
+      "display_unit": "percent",
+      "movement_unit": "percentage_points",
+      "numerator": "platform_ftu",
+      "denominator": "registrations",
+      "formula": "platform_ftu / registrations",
+      "definition": "Customers becoming Platform FTUs relative to registrations in the same reporting period.",
+      "caveats": [
+        "Compares period totals, not a matched registration cohort; customers who registered in earlier months can become Platform FTUs this month, so values can exceed 100%.",
+        "Distinct from RR2Net (ride-request fulfilment to dropped rides).",
+        "Aggregate approved counts before dividing; never average city ratios."
+      ]
+    },
+    "link_share": {
+      "id": "link_share",
+      "label": "Bike/Link PFTU Share",
+      "aliases": [
+        "Bike Share",
+        "Link Share"
+      ],
+      "kind": "ratio",
+      "unit": "fraction",
+      "display_unit": "percent",
+      "movement_unit": "percentage_points",
+      "numerator": "platform_link_ftu",
+      "denominator": "platform_ftu",
+      "formula": "platform_link_ftu / platform_ftu",
+      "definition": "Bike/Link PFTUs relative to all Platform FTUs in the reporting period.",
+      "caveats": [
+        "Reported Bike/Link, Auto, and Cab PFTU shares need not sum to 100%.",
+        "Inherits Bike/Link PFTU provenance and proxy caveats for the underlying month."
+      ]
+    },
+    "auto_share": {
+      "id": "auto_share",
+      "label": "Auto PFTU Share",
+      "aliases": [
+        "Auto Share"
+      ],
+      "kind": "ratio",
+      "unit": "fraction",
+      "display_unit": "percent",
+      "movement_unit": "percentage_points",
+      "numerator": "platform_auto_ftu",
+      "denominator": "platform_ftu",
+      "formula": "platform_auto_ftu / platform_ftu",
+      "definition": "Auto PFTUs relative to all Platform FTUs in the reporting period.",
+      "caveats": [
+        "Reported Bike/Link, Auto, and Cab PFTU shares need not sum to 100%."
+      ]
+    },
+    "cab_share": {
+      "id": "cab_share",
+      "label": "Cab PFTU Share",
+      "aliases": [
+        "Cab Share"
+      ],
+      "kind": "ratio",
+      "unit": "fraction",
+      "display_unit": "percent",
+      "movement_unit": "percentage_points",
+      "numerator": "platform_cab_ftu",
+      "denominator": "platform_ftu",
+      "formula": "platform_cab_ftu / platform_ftu",
+      "definition": "Cab PFTUs relative to all Platform FTUs in the reporting period.",
+      "caveats": [
+        "Reported Bike/Link, Auto, and Cab PFTU shares need not sum to 100%; Cab excludes c2c."
+      ]
+    }
+  },
+  "movements": {
+    "absolute_delta": {
+      "id": "absolute_delta",
+      "label": "Absolute Change",
+      "kind": "movement",
+      "unit": "count",
+      "display_unit": "customers_or_installations",
+      "formula": "latest - previous",
+      "definition": "Period-over-period difference in a count metric (latest count minus previous count)."
+    },
+    "growth_fraction": {
+      "id": "growth_fraction",
+      "label": "Volume Growth",
+      "kind": "movement",
+      "unit": "fraction",
+      "display_unit": "percent",
+      "formula": "(latest - previous) / previous",
+      "definition": "Relative change in a count metric over the previous period count; unavailable when either operand is missing or the previous count is zero."
+    },
+    "delta_pp": {
+      "id": "delta_pp",
+      "label": "Ratio Movement",
+      "kind": "movement",
+      "unit": "percentage_points",
+      "display_unit": "pp",
+      "formula": "100 * (latest - previous)",
+      "definition": "Signed percentage-point difference between the latest and previous fractional ratios (for example, 40% to 45% is +5pp, not +5%)."
+    },
+    "link_vs_auto_share_gap": {
+      "id": "link_vs_auto_share_gap",
+      "label": "Bike-Auto Share Gap",
+      "kind": "derived_difference",
+      "unit": "fraction",
+      "display_unit": "percentage_point_gap",
+      "movement_unit": "percentage_points",
+      "operands": [
+        "link_share",
+        "auto_share"
+      ],
+      "formula": "link_share - auto_share",
+      "definition": "Difference between Bike/Link PFTU share and Auto PFTU share in the same period; period movement is 100 * (latest gap - previous gap) in percentage points."
+    }
+  },
+  "glossary_distinctions": {
+    "svn": {
+      "term": "Service FTU (SVN)",
+      "supported_in_v1": false,
+      "definition": "A customer taking a particular Rapido service for the first time, even after completing earlier rides on another Rapido service. GrowthOS V1 service breakdowns measure service PFTU (first-ever Rapido ride), not SVN."
+    },
+    "rr2net": {
+      "term": "RR2Net",
+      "supported_in_v1": false,
+      "definition": "Ride-request fulfilment ratio (dropped rides relative to ride requests). GrowthOS R2N is Registration-to-PFTU, not RR2Net."
+    }
+  },
+  "rules": {
+    "reporting_period": "Completed calendar months in Asia/Kolkata; adjacent months are MoM and nonadjacent pairs are period comparisons.",
+    "missing_and_zero_values": "Missing city-month observations or operands remain null (unavailable), never zero. Zero denominators or zero baselines make ratios or growth unavailable while valid absolute deltas remain available.",
+    "aggregation": "Sum approved counts across complete cohorts before dividing ratios; never average city ratios or sum monthly unique counts into multi-month distinct totals. Incomplete cohort totals stay null alongside labeled known_subtotal values.",
+    "interpretation": "Arithmetic and funnel movements describe observations, not proven marketing, CRM, pricing, or supply causality. Stored month_metadata governs actual extraction provenance."
+  }
+}
