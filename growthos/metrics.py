@@ -1,9 +1,11 @@
 """Reviewed metric arithmetic and completeness-aware aggregate comparisons."""
 
 import copy
+from dataclasses import dataclass
 from decimal import Decimal, localcontext
 from importlib.resources import files
 import json
+from typing import Mapping
 
 from .contracts import RATIOS, VOLUMES, text
 from .errors import reject
@@ -18,6 +20,109 @@ _RATIO_FIELDS = {
     "numerator", "denominator", "formula", "definition", "caveats",
 }
 _MOVEMENT_KEYS = {"absolute_delta", "growth_fraction", "delta_pp", "link_vs_auto_share_gap"}
+
+
+@dataclass(frozen=True)
+class AggregateObservation:
+    """A complete count (or unavailable), distinct from its observed subtotal."""
+
+    value: int | None
+    known_subtotal: int
+    observed_city_count: int
+    unavailable_city_count: int
+    reason: str | None
+
+    def to_dict(self) -> dict:
+        return {
+            "value": self.value, "known_subtotal": self.known_subtotal,
+            "observed_city_count": self.observed_city_count,
+            "unavailable_city_count": self.unavailable_city_count, "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class VolumeComparison:
+    """Scalar city counts or explicitly selected aggregate operands."""
+
+    previous: int | None
+    latest: int | None
+    absolute_delta: int | None
+    growth_fraction: float | None
+
+    def to_dict(self) -> dict:
+        return {
+            "previous": self.previous, "latest": self.latest,
+            "absolute_delta": self.absolute_delta, "growth_fraction": self.growth_fraction,
+        }
+
+
+@dataclass(frozen=True)
+class RatioComparison:
+    """Fractional levels with movement expressed in percentage points."""
+
+    previous: float | None
+    latest: float | None
+    delta_pp: float | None
+
+    def to_dict(self) -> dict:
+        return {"previous": self.previous, "latest": self.latest, "delta_pp": self.delta_pp}
+
+
+@dataclass(frozen=True)
+class GroupVolumeComparison:
+    """Coverage-bearing observations, never interchangeable with scalar counts."""
+
+    previous: AggregateObservation
+    latest: AggregateObservation
+    absolute_delta: int | None
+    growth_fraction: float | None
+    growth_unavailable_reason: str | None
+    known_subtotal_delta: int | None
+    known_subtotal_growth_fraction: float | None
+
+    def to_dict(self) -> dict:
+        return {
+            "previous": self.previous.to_dict(), "latest": self.latest.to_dict(),
+            "absolute_delta": self.absolute_delta, "growth_fraction": self.growth_fraction,
+            "growth_unavailable_reason": self.growth_unavailable_reason,
+            "known_subtotal_delta": self.known_subtotal_delta,
+            "known_subtotal_growth_fraction": self.known_subtotal_growth_fraction,
+        }
+
+
+@dataclass(frozen=True)
+class GroupRatioComparison:
+    """Strict ratio movement alongside explicitly labeled subtotal evidence."""
+
+    previous: float | None
+    latest: float | None
+    delta_pp: float | None
+    previous_unavailable_reason: str | None
+    latest_unavailable_reason: str | None
+    known_subtotal_previous: float | None
+    known_subtotal_latest: float | None
+    known_subtotal_delta_pp: float | None
+
+    def to_dict(self) -> dict:
+        return {
+            "previous": self.previous, "latest": self.latest, "delta_pp": self.delta_pp,
+            "previous_unavailable_reason": self.previous_unavailable_reason,
+            "latest_unavailable_reason": self.latest_unavailable_reason,
+            "known_subtotal_previous": self.known_subtotal_previous,
+            "known_subtotal_latest": self.known_subtotal_latest,
+            "known_subtotal_delta_pp": self.known_subtotal_delta_pp,
+        }
+
+
+def metrics_output(
+    volumes: Mapping[str, VolumeComparison | GroupVolumeComparison],
+    ratios: Mapping[str, RatioComparison | GroupRatioComparison],
+) -> dict:
+    """Format typed results into the existing scalar or coverage-bearing JSON shape."""
+    return {
+        "volumes": {metric: value.to_dict() for metric, value in volumes.items()},
+        "ratios": {metric: value.to_dict() for metric, value in ratios.items()},
+    }
 
 
 def _string_list(value: object, *, allow_empty: bool = False, max_len: int = 240) -> bool:
@@ -163,74 +268,143 @@ def definitions() -> dict:
     }
 
 
-def pair_metrics(before: dict | None, after: dict | None) -> tuple[dict, dict]:
+def compare_pair(
+    before: dict | None, after: dict | None,
+) -> tuple[dict[str, VolumeComparison], dict[str, RatioComparison]]:
     """Calculate scalar movements; callers choose strict values or known subtotals."""
     before, after = before or {}, after or {}
-    volumes, ratios = {}, {}
+    volumes: dict[str, VolumeComparison] = {}
+    ratios: dict[str, RatioComparison] = {}
     with localcontext() as context:
         context.prec = 40
         for metric in VOLUMES:
             a, b = before.get(metric), after.get(metric)
             delta = None if a is None or b is None else b - a
-            volumes[metric] = {
-                "previous": a, "latest": b, "absolute_delta": delta,
-                "growth_fraction": number(quotient(delta, a)),
-            }
+            volumes[metric] = VolumeComparison(a, b, delta, number(quotient(delta, a)))
         for metric, (numerator, denominator) in RATIOS.items():
             a = quotient(before.get(numerator), before.get(denominator))
             b = quotient(after.get(numerator), after.get(denominator))
-            ratios[metric] = {
-                "previous": number(a), "latest": number(b),
-                "delta_pp": number(None if a is None or b is None else 100 * (b - a)),
-            }
+            ratios[metric] = RatioComparison(
+                number(a), number(b), number(None if a is None or b is None else 100 * (b - a)),
+            )
     return volumes, ratios
 
 
-def aggregate(rows: list[dict], expected_cities: set[str]) -> dict:
+def aggregate_observations(rows: list[dict], expected_cities: set[str]) -> dict[str, AggregateObservation]:
     missing_rows = len(expected_cities - {r["city_key"] for r in rows})
-    result = {}
+    result: dict[str, AggregateObservation] = {}
     for metric in VOLUMES:
         observed = sum(row[metric] is not None for row in rows)
         unavailable = missing_rows + sum(row[metric] is None for row in rows)
         subtotal = sum(row[metric] for row in rows if row[metric] is not None)
-        result[metric] = {
-            "value": None if unavailable else subtotal,
-            "known_subtotal": subtotal,
-            "observed_city_count": observed,
-            "unavailable_city_count": unavailable,
-            "reason": "missing_city_or_operand" if unavailable else None,
-        }
+        result[metric] = AggregateObservation(
+            value=None if unavailable else subtotal,
+            known_subtotal=subtotal,
+            observed_city_count=observed,
+            unavailable_city_count=unavailable,
+            reason="missing_city_or_operand" if unavailable else None,
+        )
     return result
 
 
-def group_metrics(before: dict, after: dict) -> tuple[dict, dict]:
+def compare_groups(
+    before: Mapping[str, AggregateObservation], after: Mapping[str, AggregateObservation],
+) -> tuple[dict[str, GroupVolumeComparison], dict[str, GroupRatioComparison]]:
     """Compare aggregate values, retaining coverage and known-subtotal evidence."""
-    volumes, ratios = pair_metrics(
-        {m: before[m]["value"] for m in VOLUMES},
-        {m: after[m]["value"] for m in VOLUMES},
+    scalar_volumes, scalar_ratios = compare_pair(
+        {m: before[m].value for m in VOLUMES},
+        {m: after[m].value for m in VOLUMES},
     )
-    subtotal_volumes, subtotal_ratios = pair_metrics(
-        {m: before[m]["known_subtotal"] if before[m]["observed_city_count"] else None for m in VOLUMES},
-        {m: after[m]["known_subtotal"] if after[m]["observed_city_count"] else None for m in VOLUMES},
+    subtotal_volumes, subtotal_ratios = compare_pair(
+        {m: before[m].known_subtotal if before[m].observed_city_count else None for m in VOLUMES},
+        {m: after[m].known_subtotal if after[m].observed_city_count else None for m in VOLUMES},
     )
-    for metric, values in volumes.items():
-        a, delta = values["previous"], values["absolute_delta"]
-        values.update({
-            "previous": before[metric], "latest": after[metric],
-            "growth_unavailable_reason": "missing_operand" if delta is None else "zero_baseline" if a == 0 else None,
-            "known_subtotal_delta": subtotal_volumes[metric]["absolute_delta"],
-            "known_subtotal_growth_fraction": subtotal_volumes[metric]["growth_fraction"],
-        })
+    volumes: dict[str, GroupVolumeComparison] = {}
+    ratios: dict[str, GroupRatioComparison] = {}
+    for metric, values in scalar_volumes.items():
+        a, delta = values.previous, values.absolute_delta
+        volumes[metric] = GroupVolumeComparison(
+            previous=before[metric], latest=after[metric],
+            absolute_delta=delta, growth_fraction=values.growth_fraction,
+            growth_unavailable_reason="missing_operand" if delta is None else "zero_baseline" if a == 0 else None,
+            known_subtotal_delta=subtotal_volumes[metric].absolute_delta,
+            known_subtotal_growth_fraction=subtotal_volumes[metric].growth_fraction,
+        )
     for metric, (numerator, denominator) in RATIOS.items():
-        values, subtotal = ratios[metric], subtotal_ratios[metric]
-        for side, operands in (("previous", before), ("latest", after)):
-            values[f"{side}_unavailable_reason"] = (
-                "missing_operand" if operands[numerator]["value"] is None or operands[denominator]["value"] is None
-                else "zero_denominator" if values[side] is None else None
-            )
-        values.update({
-            "known_subtotal_previous": subtotal["previous"],
-            "known_subtotal_latest": subtotal["latest"],
-            "known_subtotal_delta_pp": subtotal["delta_pp"],
-        })
+        ratio, subtotal = scalar_ratios[metric], subtotal_ratios[metric]
+        ratios[metric] = GroupRatioComparison(
+            previous=ratio.previous, latest=ratio.latest, delta_pp=ratio.delta_pp,
+            previous_unavailable_reason=_ratio_unavailable_reason(before[numerator], before[denominator], ratio.previous),
+            latest_unavailable_reason=_ratio_unavailable_reason(after[numerator], after[denominator], ratio.latest),
+            known_subtotal_previous=subtotal.previous,
+            known_subtotal_latest=subtotal.latest,
+            known_subtotal_delta_pp=subtotal.delta_pp,
+        )
     return volumes, ratios
+
+
+def _ratio_unavailable_reason(
+    numerator: AggregateObservation, denominator: AggregateObservation, value: float | None,
+) -> str | None:
+    if numerator.value is None or denominator.value is None:
+        return "missing_operand"
+    return "zero_denominator" if value is None else None
+
+
+def share_gap(link: RatioComparison, auto: RatioComparison) -> RatioComparison:
+    """Link-minus-Auto fractional levels and movement in percentage points."""
+    return _share_gap(link.previous, auto.previous, link.latest, auto.latest)
+
+
+def group_share_gap(link: GroupRatioComparison, auto: GroupRatioComparison) -> GroupRatioComparison:
+    strict = _share_gap(link.previous, auto.previous, link.latest, auto.latest)
+    subtotal = _share_gap(
+        link.known_subtotal_previous, auto.known_subtotal_previous,
+        link.known_subtotal_latest, auto.known_subtotal_latest,
+    )
+    return GroupRatioComparison(
+        previous=strict.previous, latest=strict.latest, delta_pp=strict.delta_pp,
+        previous_unavailable_reason=link.previous_unavailable_reason or auto.previous_unavailable_reason,
+        latest_unavailable_reason=link.latest_unavailable_reason or auto.latest_unavailable_reason,
+        known_subtotal_previous=subtotal.previous, known_subtotal_latest=subtotal.latest,
+        known_subtotal_delta_pp=subtotal.delta_pp,
+    )
+
+
+def _share_gap(
+    previous_link: float | None, previous_auto: float | None,
+    latest_link: float | None, latest_auto: float | None,
+) -> RatioComparison:
+    # Keep the existing aggregate policy: operate on decimal representations of
+    # fractional ratio levels, not binary-float subtraction or recomputed ratios.
+    with localcontext() as context:
+        context.prec = 40
+        previous = (
+            None if previous_link is None or previous_auto is None
+            else Decimal(str(previous_link)) - Decimal(str(previous_auto))
+        )
+        latest = (
+            None if latest_link is None or latest_auto is None
+            else Decimal(str(latest_link)) - Decimal(str(latest_auto))
+        )
+        movement = None if previous is None or latest is None else 100 * (latest - previous)
+        return RatioComparison(number(previous), number(latest), number(movement))
+
+
+# Preserve dictionary-returning calculation interfaces for existing callers.
+# Analytical operations use the typed functions above and format only their output.
+def pair_metrics(before: dict | None, after: dict | None) -> tuple[dict, dict]:
+    output = metrics_output(*compare_pair(before, after))
+    return output["volumes"], output["ratios"]
+
+
+def aggregate(rows: list[dict], expected_cities: set[str]) -> dict:
+    return {metric: value.to_dict() for metric, value in aggregate_observations(rows, expected_cities).items()}
+
+
+def group_metrics(before: dict, after: dict) -> tuple[dict, dict]:
+    output = metrics_output(*compare_groups(
+        {m: AggregateObservation(**value) for m, value in before.items()},
+        {m: AggregateObservation(**value) for m, value in after.items()},
+    ))
+    return output["volumes"], output["ratios"]

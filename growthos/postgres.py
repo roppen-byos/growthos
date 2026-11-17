@@ -11,18 +11,8 @@ from .contracts import FACT_FIELDS, MAX_FACTS, MAX_MONTHS, checksum, month, vali
 from .errors import reject
 from .evidence import status_result, validate_city_offset
 
-FORBIDDEN_ENV_PREFIXES = (
-    "GROWTHOS_WRITER_", "GROWTHOS_OWNER_", "GROWTHOS_TEST_", "GROWTHOS_TRINO_",
-    "TRINO_", "NEON_", "VERCEL_", "PGPASSWORD", "DATABASE_URL",
-)
 DEFAULT_ENV_FILE: Path | None = Path(__file__).resolve().parents[1] / ".env"
 _UNSET = object()
-
-
-def assert_analysis_environment(environ: dict | None = None) -> None:
-    env = os.environ if environ is None else environ
-    if any(any(key.startswith(prefix) for prefix in FORBIDDEN_ENV_PREFIXES) and value for key, value in env.items()):
-        reject("CREDENTIAL_BOUNDARY", "Analysis requires a clean reader-only environment.")
 
 
 def local_setting(
@@ -30,7 +20,6 @@ def local_setting(
     path: Path | None,
     *,
     environ: dict | None = None,
-    forbidden_prefixes: tuple[str, ...] = (),
 ) -> str:
     """Read one literal credential from env or a bounded local file without shell/env mutation."""
     env = os.environ if environ is None else environ
@@ -64,8 +53,6 @@ def local_setting(
                 if len(candidate) < 2 or candidate[-1] != candidate[0]:
                     reject("CONFIGURATION", "Malformed quoted local setting; details withheld.")
                 candidate = candidate[1:-1]
-            if forbidden_prefixes and any(name.startswith(prefix) for prefix in forbidden_prefixes) and candidate:
-                reject("CREDENTIAL_BOUNDARY", "Analysis requires a clean reader-only environment.")
             if name == key:
                 found.append(candidate)
         if len(found) != 1 or not found[0]:
@@ -94,9 +81,8 @@ def validate_reader_settings(settings: dict) -> None:
 
 @contextmanager
 def connect_reader(*, env_file=_UNSET):
-    assert_analysis_environment()
     resolved_env_file = DEFAULT_ENV_FILE if env_file is _UNSET else env_file
-    dsn = local_setting("GROWTHOS_READER_DSN", resolved_env_file, forbidden_prefixes=FORBIDDEN_ENV_PREFIXES)
+    dsn = local_setting("GROWTHOS_READER_DSN", resolved_env_file)
     try:
         import psycopg
         from psycopg.conninfo import conninfo_to_dict

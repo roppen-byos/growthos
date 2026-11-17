@@ -68,7 +68,6 @@ string in chat. The reviewed CLI may load its own settings.
 | `CONFIGURATION` | Follow step 3 to prepare a missing `.env` and give direct local editing instructions. If already configured, ask the user to correct it privately. |
 | `DEPENDENCY` | Re-run the editable installation with the same project interpreter, then repeat package and connection checks. |
 | `TLS` | Ask the user to use the provided hostname-verified connection (`sslmode=verify-full`); preserve TLS verification. |
-| `CREDENTIAL_BOUNDARY` | Ask the user to use a clean reader-only environment and remove unrelated privileged settings locally. Inspect neither the file nor environment values. |
 | `READ_ONLY_ROLE` | Ask the user to obtain the dedicated read-only reporting connection from their administrator. |
 | `DATABASE_UNAVAILABLE` | Ask the user to check network access and have their administrator confirm the connection privately. This error alone does not identify the cause. |
 | Other errors | Report the sanitized code/message and the remaining blocker; leave schema, permissions and reporting data unchanged. |

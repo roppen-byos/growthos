@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, localcontext
+from decimal import Decimal
 
 from .classification import CANONICAL_CITIES
-from .contracts import RATIOS, TIERS, VOLUMES, MonthlyData, month, next_month
+from .contracts import RATIOS, TIERS, VOLUMES, MonthlyData
 from .errors import reject
 # Preserve existing public imports; new callers use the owning modules.
 from .evidence import MISSING_TOTALS_WARNING, TIER_RECLASSIFIED_WARNING, catalog, provenance
 from .metrics import ALL_METRICS, aggregate, definitions, group_metrics, number, pair_metrics, quotient
+from .metrics import (
+    GroupRatioComparison, GroupVolumeComparison, aggregate_observations,
+    compare_groups, compare_pair, group_share_gap, metrics_output, share_gap,
+)
 from .selection import normalize_tier, paired_cohort, select_pair, validate_top
+from .selection import prepare_comparison
 
 SERVICE_MAP = {
     "link": ("platform_link_ftu", "link_share"),
@@ -41,29 +46,28 @@ def compare_overall(
         reject("ARGUMENTS", "Use --group-by city when filtering by --city.")
     top_limit = validate_top(top)
 
-    data = dataset.data
-    prev, curr = select_pair(dataset, previous, latest, data=data)
-    period_rows = [r for r in data["facts"] if r["month"] in (prev, curr)]
-    pairs, reclassified = paired_cohort(period_rows, prev, curr, tier_filter=tier_filter, cities=cities)
+    comparison = prepare_comparison(dataset, previous, latest, tier_filter=tier_filter, cities=cities)
+    prev, curr, pairs = comparison.previous, comparison.latest, comparison.pairs
 
     out_rows = []
     omitted_row_count = 0
     if group_by == "overall":
         expected = {meta["city_key"] for meta, _, _ in pairs}
-        before = aggregate([prev_r for _, prev_r, _ in pairs if prev_r is not None], expected)
-        after = aggregate([curr_r for _, _, curr_r in pairs if curr_r is not None], expected)
-        volumes, ratios = group_metrics(before, after)
-        out_rows.append({"group": "overall", "volumes": volumes, "ratios": ratios})
+        before = aggregate_observations([prev_r for _, prev_r, _ in pairs if prev_r is not None], expected)
+        after = aggregate_observations([curr_r for _, _, curr_r in pairs if curr_r is not None], expected)
+        out_rows.append({"group": "overall", **metrics_output(*compare_groups(before, after))})
         operation = "compare-overall"
     elif group_by == "tier":
         tiers_to_show = [tier_filter] if tier_filter else [t for t in TIERS if any(m["tier"] == t for m, _, _ in pairs)]
         for t in tiers_to_show:
             t_pairs = [p for p in pairs if p[0]["tier"] == t]
             expected = {m["city_key"] for m, _, _ in t_pairs}
-            before = aggregate([prev_r for _, prev_r, _ in t_pairs if prev_r is not None], expected)
-            after = aggregate([curr_r for _, _, curr_r in t_pairs if curr_r is not None], expected)
-            volumes, ratios = group_metrics(before, after)
-            out_rows.append({"group": t, "tier": t, "city_count": len(expected), "volumes": volumes, "ratios": ratios})
+            before = aggregate_observations([prev_r for _, prev_r, _ in t_pairs if prev_r is not None], expected)
+            after = aggregate_observations([curr_r for _, _, curr_r in t_pairs if curr_r is not None], expected)
+            out_rows.append({
+                "group": t, "tier": t, "city_count": len(expected),
+                **metrics_output(*compare_groups(before, after)),
+            })
         operation = "compare-tier"
     else:
         ordered_pairs = sorted(
@@ -79,22 +83,21 @@ def compare_overall(
         omitted_row_count = len(ordered_pairs) - len(selected_pairs)
         for meta, prev_row, curr_row in selected_pairs:
             key = meta["city_key"]
-            before = aggregate([prev_row] if prev_row is not None else [], {key})
-            after = aggregate([curr_row] if curr_row is not None else [], {key})
-            volumes, ratios = group_metrics(before, after)
+            before = aggregate_observations([prev_row] if prev_row is not None else [], {key})
+            after = aggregate_observations([curr_row] if curr_row is not None else [], {key})
             out_rows.append({
                 "group": key, "city_key": key, "city": meta["city"], "tier": meta["tier"],
-                "source_cities": meta["source_cities"], "volumes": volumes, "ratios": ratios,
+                "source_cities": meta["source_cities"], **metrics_output(*compare_groups(before, after)),
             })
         operation = "compare-city"
 
     result = {
-        **provenance(dataset, data=data),
+        **provenance(dataset, data=comparison.data),
         "operation": operation,
         "group_by": group_by,
         "requested_periods": {"previous": previous, "latest": latest},
         "effective_periods": {"previous": prev, "latest": curr},
-        "comparison_label": "MoM" if next_month(month(prev)) == month(curr) else "period comparison",
+        "comparison_label": comparison.label,
         "filters": {
             "cities": sorted(cities) if cities else "all",
             "tiers": tier_filter or "all",
@@ -105,7 +108,7 @@ def compare_overall(
         "omitted_row_count": omitted_row_count,
         "narrowing": "Use compare --group-by overall|tier|city, rank, funnel, or share-drivers to drill down.",
     }
-    unmapped_rows = [r for r in period_rows if r["tier"] == "T3" and r["city_key"] not in CANONICAL_CITIES]
+    unmapped_rows = [r for r in comparison.period_rows if r["tier"] == "T3" and r["city_key"] not in CANONICAL_CITIES]
     result["mapping_impact"] = {
         "unmapped_city_count": len({r["city_key"] for r in unmapped_rows}),
         "fallback_tier": "T3",
@@ -116,7 +119,7 @@ def compare_overall(
     }
     if unmapped_rows:
         result["warnings"].append("Unmapped cities included in T3 and overall totals; see mapping_impact.")
-    if group_by != "overall" and reclassified:
+    if group_by != "overall" and comparison.reclassified:
         result["warnings"].append(TIER_RECLASSIFIED_WARNING)
     if any(v["absolute_delta"] is None for row in out_rows for v in row["volumes"].values()):
         result["warnings"].append(MISSING_TOTALS_WARNING)
@@ -143,43 +146,40 @@ def rank_cities(
         reject("ARGUMENTS", "Ratio and share metrics must be ranked by delta (percentage points).")
     top_limit = validate_top(top)
     tier_filter = normalize_tier(tier)
-    data = dataset.data
-    prev, curr = select_pair(dataset, previous, latest, data=data)
-
-    period_rows = [r for r in data["facts"] if r["month"] in (prev, curr)]
-    pairs, reclassified = paired_cohort(period_rows, prev, curr, tier_filter=tier_filter)
+    comparison = prepare_comparison(dataset, previous, latest, tier_filter=tier_filter)
+    prev, curr, pairs = comparison.previous, comparison.latest, comparison.pairs
     rankable = []
     excluded_unavailable = 0
     for meta, prev_row, curr_row in pairs:
         key, display, c_tier = meta["city_key"], meta["city"], meta["tier"]
-        volumes, ratios = pair_metrics(prev_row, curr_row)
+        volumes, ratios = compare_pair(prev_row, curr_row)
         if metric in VOLUMES:
-            m_data = volumes[metric]
-            movement = m_data["absolute_delta"] if basis == "delta" else m_data["growth_fraction"]
-            latest_val = m_data["latest"]
+            volume = volumes[metric]
+            movement = volume.absolute_delta if basis == "delta" else volume.growth_fraction
+            latest_val = volume.latest
             entry = {
                 "city_key": key, "city": display, "tier": c_tier, "metric": metric,
-                "previous": m_data["previous"], "latest": m_data["latest"],
-                "absolute_delta": m_data["absolute_delta"], "growth_fraction": m_data["growth_fraction"],
-                "platform_ftu_latest": volumes["platform_ftu"]["latest"],
-                "registrations_latest": volumes["registrations"]["latest"],
+                "previous": volume.previous, "latest": volume.latest,
+                "absolute_delta": volume.absolute_delta, "growth_fraction": volume.growth_fraction,
+                "platform_ftu_latest": volumes["platform_ftu"].latest,
+                "registrations_latest": volumes["registrations"].latest,
             }
         else:
-            m_data = ratios[metric]
+            ratio = ratios[metric]
             num_col, den_col = RATIOS[metric]
-            movement = m_data["delta_pp"]
-            latest_val = m_data["latest"]
+            movement = ratio.delta_pp
+            latest_val = ratio.latest
             entry = {
                 "city_key": key, "city": display, "tier": c_tier, "metric": metric,
-                "previous": m_data["previous"], "latest": m_data["latest"], "delta_pp": m_data["delta_pp"],
+                "previous": ratio.previous, "latest": ratio.latest, "delta_pp": ratio.delta_pp,
                 "numerator_metric": num_col,
-                "numerator_previous": volumes[num_col]["previous"],
-                "numerator_latest": volumes[num_col]["latest"],
-                "numerator_delta": volumes[num_col]["absolute_delta"],
+                "numerator_previous": volumes[num_col].previous,
+                "numerator_latest": volumes[num_col].latest,
+                "numerator_delta": volumes[num_col].absolute_delta,
                 "denominator_metric": den_col,
-                "denominator_previous": volumes[den_col]["previous"],
-                "denominator_latest": volumes[den_col]["latest"],
-                "denominator_delta": volumes[den_col]["absolute_delta"],
+                "denominator_previous": volumes[den_col].previous,
+                "denominator_latest": volumes[den_col].latest,
+                "denominator_delta": volumes[den_col].absolute_delta,
             }
         if movement is None:
             excluded_unavailable += 1
@@ -194,11 +194,11 @@ def rank_cities(
         selected.append({"rank": idx, **entry})
 
     result = {
-        **provenance(dataset, data=data),
+        **provenance(dataset, data=comparison.data),
         "operation": "rank",
         "requested_periods": {"previous": previous, "latest": latest},
         "effective_periods": {"previous": prev, "latest": curr},
-        "comparison_label": "MoM" if next_month(month(prev)) == month(curr) else "period comparison",
+        "comparison_label": comparison.label,
         "filters": {
             "metric": metric,
             "tier": tier_filter or "all",
@@ -213,7 +213,7 @@ def rank_cities(
         "omitted_row_count": max(0, len(rankable) - len(selected)),
         "narrowing": "Pass --tier T1|T2|T3, --top N, or --ascending to refine rankings, or run funnel --city CITY for funnel drivers.",
     }
-    if reclassified:
+    if comparison.reclassified:
         result["warnings"].append(TIER_RECLASSIFIED_WARNING)
     return result
 
@@ -256,9 +256,9 @@ _FUNNEL_SORT_FIELDS = {
 def _resolve_funnel_sort_key(row: dict, sort_by: str) -> float | int | None:
     normalized = sort_by.strip().lower().replace("_mom_abs", "_delta").replace("_mom_pct", "_growth")
     if normalized not in _FUNNEL_SORT_FIELDS:
-        reject("ARGUMENTS", f"Unsupported funnel sort key '{sort_by}'.")
+        reject("ARGUMENTS", "Unsupported funnel sort key; run 'funnel --help' for reviewed keys. Input values withheld.")
     group, metric, field = _FUNNEL_SORT_FIELDS[normalized]
-    return row[group][metric][field]
+    return getattr(row[group][metric], field)
 
 
 def _funnel_column(row: dict, column: str):
@@ -267,9 +267,9 @@ def _funnel_column(row: dict, column: str):
         return row[field]
     values = row[group][metric]
     if field in ("fraction_difference", "relative_growth"):
-        delta = None if values["delta_pp"] is None else Decimal(str(values["delta_pp"])) / 100
-        return number(delta if field == "fraction_difference" else quotient(delta, values["previous"]))
-    return values[field]
+        delta = None if values.delta_pp is None else Decimal(str(values.delta_pp)) / 100
+        return number(delta if field == "fraction_difference" else quotient(delta, values.previous))
+    return getattr(values, field)
 
 
 def city_funnels(
@@ -297,16 +297,13 @@ def city_funnels(
             normalized_cols.append(canonical)
         columns = list(dict.fromkeys(normalized_cols))
     tier_filter = normalize_tier(tier)
-    data = dataset.data
-    prev, curr = select_pair(dataset, previous, latest, data=data)
-
-    period_rows = [r for r in data["facts"] if r["month"] in (prev, curr)]
-    pairs, reclassified = paired_cohort(period_rows, prev, curr, tier_filter=tier_filter, cities=cities)
+    comparison = prepare_comparison(dataset, previous, latest, tier_filter=tier_filter, cities=cities)
+    prev, curr, pairs = comparison.previous, comparison.latest, comparison.pairs
 
     built = []
     for meta, prev_row, curr_row in pairs:
         key = meta["city_key"]
-        volumes, ratios = pair_metrics(prev_row, curr_row)
+        volumes, ratios = compare_pair(prev_row, curr_row)
         item = {
             "city_key": key, "city": meta["city"], "tier": meta["tier"],
             "source_cities": meta["source_cities"], "volumes": volumes, "ratios": ratios,
@@ -319,13 +316,15 @@ def city_funnels(
     selected = [item for _, _, _, item in built[:limit]]
     if columns:
         selected = [{column: _funnel_column(item, column) for column in columns} for item in selected]
+    else:
+        selected = [{**item, **metrics_output(item["volumes"], item["ratios"])} for item in selected]
 
     result = {
-        **provenance(dataset, data=data),
+        **provenance(dataset, data=comparison.data),
         "operation": "funnel",
         "requested_periods": {"previous": previous, "latest": latest},
         "effective_periods": {"previous": prev, "latest": curr},
-        "comparison_label": "MoM" if next_month(month(prev)) == month(curr) else "period comparison",
+        "comparison_label": comparison.label,
         "filters": {
             "cities": sorted(cities) if cities else "top_by_sort",
             "tier": tier_filter or "all",
@@ -340,46 +339,27 @@ def city_funnels(
         "omitted_row_count": max(0, len(built) - len(selected)),
         "narrowing": "Pass --city CITY (repeatable), --tier T1|T2|T3, --sort METRIC_delta, or --top N.",
     }
-    if reclassified:
+    if comparison.reclassified:
         result["warnings"].append(TIER_RECLASSIFIED_WARNING)
     return result
 
 
-def _service_mix_summary(pairs: list[tuple[dict, dict | None, dict | None]]) -> dict:
+def _service_mix_summary(
+    pairs: list[tuple[dict, dict | None, dict | None]],
+) -> tuple[dict[str, GroupVolumeComparison], dict[str, GroupRatioComparison]]:
     expected = {meta["city_key"] for meta, _, _ in pairs}
-    before = aggregate([prev_r for _, prev_r, _ in pairs if prev_r is not None], expected)
-    after = aggregate([curr_r for _, _, curr_r in pairs if curr_r is not None], expected)
-    all_volumes, all_ratios = group_metrics(before, after)
+    before = aggregate_observations([prev_r for _, prev_r, _ in pairs if prev_r is not None], expected)
+    after = aggregate_observations([curr_r for _, _, curr_r in pairs if curr_r is not None], expected)
+    all_volumes, all_ratios = compare_groups(before, after)
     volumes = {m: all_volumes[m] for m in ("platform_ftu", "platform_link_ftu", "platform_auto_ftu", "platform_cab_ftu")}
     shares = {m: all_ratios[m] for m in ("link_share", "auto_share", "cab_share")}
-    with localcontext() as context:
-        context.prec = 40
-        def _gap(link_val: float | None, auto_val: float | None) -> Decimal | None:
-            if link_val is None or auto_val is None:
-                return None
-            return Decimal(str(link_val)) - Decimal(str(auto_val))
+    shares["link_vs_auto_share_gap"] = group_share_gap(shares["link_share"], shares["auto_share"])
+    return volumes, shares
 
-        gap_prev = _gap(shares["link_share"]["previous"], shares["auto_share"]["previous"])
-        gap_curr = _gap(shares["link_share"]["latest"], shares["auto_share"]["latest"])
-        sub_prev = _gap(shares["link_share"]["known_subtotal_previous"], shares["auto_share"]["known_subtotal_previous"])
-        sub_curr = _gap(shares["link_share"]["known_subtotal_latest"], shares["auto_share"]["known_subtotal_latest"])
-        shares["link_vs_auto_share_gap"] = {
-            "previous": number(gap_prev),
-            "latest": number(gap_curr),
-            "delta_pp": number(None if gap_prev is None or gap_curr is None else 100 * (gap_curr - gap_prev)),
-            "previous_unavailable_reason": (
-                shares["link_share"]["previous_unavailable_reason"]
-                or shares["auto_share"]["previous_unavailable_reason"]
-            ),
-            "latest_unavailable_reason": (
-                shares["link_share"]["latest_unavailable_reason"]
-                or shares["auto_share"]["latest_unavailable_reason"]
-            ),
-            "known_subtotal_previous": number(sub_prev),
-            "known_subtotal_latest": number(sub_curr),
-            "known_subtotal_delta_pp": number(None if sub_prev is None or sub_curr is None else 100 * (sub_curr - sub_prev)),
-        }
-    return {"volumes": volumes, "shares": shares}
+
+def _service_mix_output(volumes: dict[str, GroupVolumeComparison], shares: dict[str, GroupRatioComparison]) -> dict:
+    output = metrics_output(volumes, shares)
+    return {"volumes": output["volumes"], "shares": output["ratios"]}
 
 
 def share_drivers(
@@ -398,14 +378,12 @@ def share_drivers(
     target_vol, _ = SERVICE_MAP[svc_key]
     top_limit = validate_top(top)
     tier_filter = normalize_tier(tier)
-    data = dataset.data
-    prev, curr = select_pair(dataset, previous, latest, data=data)
-
-    all_period_rows = [r for r in data["facts"] if r["month"] in (prev, curr)]
-    all_pairs, all_reclassified = paired_cohort(all_period_rows, prev, curr)
-    overall_summary = _service_mix_summary(all_pairs)
-    total_ftu_latest = overall_summary["volumes"]["platform_ftu"]["latest"]["value"]
-    total_target_delta = overall_summary["volumes"][target_vol]["absolute_delta"]
+    comparison = prepare_comparison(dataset, previous, latest, tier_filter=tier_filter)
+    prev, curr, all_pairs = comparison.previous, comparison.latest, comparison.all_pairs
+    overall_volumes, overall_shares = _service_mix_summary(all_pairs)
+    total_ftu_latest = overall_volumes["platform_ftu"].latest.value
+    total_target_delta = overall_volumes[target_vol].absolute_delta
+    missing_totals = any(v.absolute_delta is None for v in overall_volumes.values())
 
     tier_rows = []
     for t in TIERS:
@@ -414,62 +392,50 @@ def share_drivers(
         t_pairs = [p for p in all_pairs if p[0]["tier"] == t]
         if not t_pairs:
             continue
-        t_mix = _service_mix_summary(t_pairs)
-        t_ftu_latest = t_mix["volumes"]["platform_ftu"]["latest"]["value"]
-        t_target_delta = t_mix["volumes"][target_vol]["absolute_delta"]
+        t_volumes, t_shares = _service_mix_summary(t_pairs)
+        t_ftu_latest = t_volumes["platform_ftu"].latest.value
+        t_target_delta = t_volumes[target_vol].absolute_delta
+        missing_totals = missing_totals or any(v.absolute_delta is None for v in t_volumes.values())
         tier_rows.append({
             "tier": t,
             "city_count": len(t_pairs),
             "latest_platform_ftu_mix": number(quotient(t_ftu_latest, total_ftu_latest)),
             "target_delta_to_overall_delta_ratio": number(quotient(t_target_delta, total_target_delta)),
-            **t_mix,
+            **_service_mix_output(t_volumes, t_shares),
         })
 
-    filtered_pairs = [p for p in all_pairs if tier_filter is None or p[0]["tier"] == tier_filter]
-    reclassified = all_reclassified if tier_filter is None else any(
-        prev_r is not None and curr_r is not None and prev_r["tier"] != curr_r["tier"]
-        for _, prev_r, curr_r in filtered_pairs
-    )
     city_entries = []
-    for meta, prev_row, curr_row in filtered_pairs:
+    for meta, prev_row, curr_row in comparison.pairs:
         key, display, c_tier = meta["city_key"], meta["city"], meta["tier"]
-        volumes, ratios = pair_metrics(prev_row, curr_row)
-        t_delta = volumes[target_vol]["absolute_delta"]
+        volumes, ratios = compare_pair(prev_row, curr_row)
+        t_delta = volumes[target_vol].absolute_delta
         if t_delta is None:
             continue
-        gap_prev = (
-            None if ratios["link_share"]["previous"] is None or ratios["auto_share"]["previous"] is None
-            else ratios["link_share"]["previous"] - ratios["auto_share"]["previous"]
-        )
-        gap_curr = (
-            None if ratios["link_share"]["latest"] is None or ratios["auto_share"]["latest"] is None
-            else ratios["link_share"]["latest"] - ratios["auto_share"]["latest"]
-        )
-        gap_delta_pp = None if gap_prev is None or gap_curr is None else 100 * (gap_curr - gap_prev)
+        gap = share_gap(ratios["link_share"], ratios["auto_share"])
         entry = {
             "city_key": key,
             "city": display,
             "tier": c_tier,
             "target_service": "link" if svc_key == "bike" else svc_key,
             "target_volume_metric": target_vol,
-            "target_ftu_previous": volumes[target_vol]["previous"],
-            "target_ftu_latest": volumes[target_vol]["latest"],
+            "target_ftu_previous": volumes[target_vol].previous,
+            "target_ftu_latest": volumes[target_vol].latest,
             "target_ftu_delta": t_delta,
-            "target_ftu_growth_fraction": volumes[target_vol]["growth_fraction"],
-            "platform_ftu_previous": volumes["platform_ftu"]["previous"],
-            "platform_ftu_latest": volumes["platform_ftu"]["latest"],
-            "platform_ftu_delta": volumes["platform_ftu"]["absolute_delta"],
-            "link_ftu_delta": volumes["platform_link_ftu"]["absolute_delta"],
-            "auto_ftu_delta": volumes["platform_auto_ftu"]["absolute_delta"],
-            "cab_ftu_delta": volumes["platform_cab_ftu"]["absolute_delta"],
-            "link_share_latest": ratios["link_share"]["latest"],
-            "link_share_delta_pp": ratios["link_share"]["delta_pp"],
-            "auto_share_latest": ratios["auto_share"]["latest"],
-            "auto_share_delta_pp": ratios["auto_share"]["delta_pp"],
-            "cab_share_latest": ratios["cab_share"]["latest"],
-            "cab_share_delta_pp": ratios["cab_share"]["delta_pp"],
-            "link_vs_auto_share_gap_delta_pp": gap_delta_pp,
-            "latest_platform_ftu_mix": number(quotient(volumes["platform_ftu"]["latest"], total_ftu_latest)),
+            "target_ftu_growth_fraction": volumes[target_vol].growth_fraction,
+            "platform_ftu_previous": volumes["platform_ftu"].previous,
+            "platform_ftu_latest": volumes["platform_ftu"].latest,
+            "platform_ftu_delta": volumes["platform_ftu"].absolute_delta,
+            "link_ftu_delta": volumes["platform_link_ftu"].absolute_delta,
+            "auto_ftu_delta": volumes["platform_auto_ftu"].absolute_delta,
+            "cab_ftu_delta": volumes["platform_cab_ftu"].absolute_delta,
+            "link_share_latest": ratios["link_share"].latest,
+            "link_share_delta_pp": ratios["link_share"].delta_pp,
+            "auto_share_latest": ratios["auto_share"].latest,
+            "auto_share_delta_pp": ratios["auto_share"].delta_pp,
+            "cab_share_latest": ratios["cab_share"].latest,
+            "cab_share_delta_pp": ratios["cab_share"].delta_pp,
+            "link_vs_auto_share_gap_delta_pp": gap.delta_pp,
+            "latest_platform_ftu_mix": number(quotient(volumes["platform_ftu"].latest, total_ftu_latest)),
             "target_delta_to_overall_delta_ratio": number(quotient(t_delta, total_target_delta)),
         }
         city_entries.append(entry)
@@ -484,17 +450,17 @@ def share_drivers(
     )[:top_limit]
 
     result = {
-        **provenance(dataset, data=data),
+        **provenance(dataset, data=comparison.data),
         "operation": "share-drivers",
         "requested_periods": {"previous": previous, "latest": latest},
         "effective_periods": {"previous": prev, "latest": curr},
-        "comparison_label": "MoM" if next_month(month(prev)) == month(curr) else "period comparison",
+        "comparison_label": comparison.label,
         "filters": {
             "service": "link" if svc_key == "bike" else svc_key,
             "tier": tier_filter or "all",
             "top": top_limit,
         },
-        "overall_service_mix": overall_summary,
+        "overall_service_mix": _service_mix_output(overall_volumes, overall_shares),
         "tier_service_mix": tier_rows,
         "top_growth_cities": top_growth,
         "top_decline_cities": top_decline,
@@ -502,8 +468,8 @@ def share_drivers(
         "omitted_city_count": max(0, len(city_entries) - top_limit),
         "narrowing": "Arithmetic decomposition only; does not establish marketing, pricing, or supply causality.",
     }
-    if reclassified:
+    if comparison.reclassified:
         result["warnings"].append(TIER_RECLASSIFIED_WARNING)
-    if any(v["absolute_delta"] is None for s in (overall_summary, *tier_rows) for v in s["volumes"].values()):
+    if missing_totals:
         result["warnings"].append(MISSING_TOTALS_WARNING)
     return result

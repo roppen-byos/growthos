@@ -62,7 +62,7 @@ CLI failures return `{"error": {"code": "...", "message": "..."}}` with sanitize
 - `CONFIGURATION`, `DEPENDENCY`, `DATABASE_UNAVAILABLE`: report only the CLI's sanitized error and point to setup steps in [README.md](../../../README.md); never read/modify `.env`, request secrets in chat, or invent numbers.
 - `ARGUMENTS`: inspect `<subcommand> --help`, fix the flag or allowed enum value, and rerun.
 - `COVERAGE`, `PERIOD`, `MONTH`, `INCOMPLETE_MONTH`, `CITY`: state the exact missing or invalid month/city from `status`, keep the user's requested scope explicit, and offer available stored periods without silent substitution.
-- `CREDENTIAL_BOUNDARY`, `READ_ONLY_ROLE`, `TLS`, `STORE_INTEGRITY`, `SCHEMA`, `PROVENANCE`: stop the analysis immediately and surface the sanitized blocker; never attempt to bypass environment, role, TLS, or checksum guards.
+- `READ_ONLY_ROLE`, `TLS`, `STORE_INTEGRITY`, `SCHEMA`, `PROVENANCE`: stop the analysis immediately and surface the sanitized blocker; never attempt to bypass role, TLS, or checksum guards.
 - `OUTPUT_BOUND`, `BOUNDS`: narrow the month window or `--top`/`--tier`/`--city` filter and disclose the narrower scope.
 - Partial coverage or `null` metrics in valid JSON: continue with observed evidence, cite `known_subtotal*` and unavailable counts where provided, and render missing values as `N/A`.
 

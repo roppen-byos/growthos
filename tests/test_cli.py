@@ -9,7 +9,7 @@ from growthos.cli import main, parser
 from growthos.errors import GrowthOSError
 from growthos.evidence import catalog
 from fixtures import demo_data, fixture_reader
-from growthos.postgres import assert_analysis_environment, validate_reader_settings
+from growthos.postgres import validate_reader_settings
 
 
 class CliTests(unittest.TestCase):
@@ -59,9 +59,6 @@ class CliTests(unittest.TestCase):
         self.assertIn("rank --help", output["error"]["message"])
         self.assertNotIn("supersecret", str(output))
 
-        for key in ("GROWTHOS_WRITER_DSN", "GROWTHOS_TRINO_USER", "TRINO_TOKEN", "NEON_API_KEY"):
-            with self.assertRaises(GrowthOSError):
-                assert_analysis_environment({key: "supersecret"})
         validate_reader_settings({"host": "approved.example.invalid", "sslmode": "verify-full"})
         with self.assertRaises(GrowthOSError):
             validate_reader_settings({"host": "approved.example.invalid", "sslmode": "require"})

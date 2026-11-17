@@ -12,7 +12,7 @@ from .analysis import (
     share_drivers,
 )
 from .contracts import month_range, validate_data
-from .errors import MAX_OUTPUT_BYTES, SafeParser, execute_cli, reject
+from .errors import DiagnosticStage, MAX_OUTPUT_BYTES, SafeParser, diagnostic_stage, execute_cli, reject
 from .evidence import provenance
 from .metrics import ALL_METRICS
 from .postgres import connect_reader
@@ -126,10 +126,15 @@ def analyze(args, dataset):
 
 
 def run(args) -> dict:
-    with connect_reader() as store:
-        if args.command == "status":
-            return store.catalog(args.city_offset)
-        return analyze(args, store.load(requested_months(args)))
+    with diagnostic_stage(DiagnosticStage.READER):
+        with connect_reader() as store:
+            if args.command == "status":
+                with diagnostic_stage(DiagnosticStage.CATALOG):
+                    return store.catalog(args.city_offset)
+            with diagnostic_stage(DiagnosticStage.LOAD):
+                dataset = store.load(requested_months(args))
+            with diagnostic_stage(DiagnosticStage.ANALYSIS):
+                return analyze(args, dataset)
 
 
 def requested_months(args):
@@ -146,7 +151,12 @@ def requested_months(args):
 
 
 def main(argv: list[str] | None = None) -> int:
-    return execute_cli(lambda: run(parser().parse_args(argv)), max_bytes=MAX_OUTPUT_BYTES)
+    def invoke():
+        with diagnostic_stage(DiagnosticStage.ARGUMENTS):
+            args = parser().parse_args(argv)
+        return run(args)
+
+    return execute_cli(invoke, max_bytes=MAX_OUTPUT_BYTES, diagnostics=True)
 
 
 if __name__ == "__main__":

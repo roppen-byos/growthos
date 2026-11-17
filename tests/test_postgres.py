@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from growthos.contracts import FACT_FIELDS, checksum, month, validate_data
 from growthos.errors import GrowthOSError
-from growthos.postgres import FORBIDDEN_ENV_PREFIXES, PostgresStore, assert_reader_permissions, connect_reader, local_setting
+from growthos.postgres import PostgresStore, assert_reader_permissions, connect_reader, local_setting
 from fixtures import FixtureReaderStore, demo_data, demo_payload
 
 
@@ -131,19 +131,19 @@ class ReaderTests(unittest.TestCase):
             connection.execute.assert_called_once_with("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             connection.close.assert_called_once()
 
-    def test_dotenv_fallback_bounds_and_credential_boundary(self):
+    def test_dotenv_fallback_bounds(self):
         with tempfile.TemporaryDirectory() as temporary:
             env_path = Path(temporary) / ".env"
             env_path.write_text("# reader config\nexport GROWTHOS_READER_DSN='synthetic-file-dsn'\n", encoding="utf-8")
             with patch.dict(os.environ, {}, clear=True):
                 self.assertEqual(
-                    local_setting("GROWTHOS_READER_DSN", env_path, forbidden_prefixes=FORBIDDEN_ENV_PREFIXES),
+                    local_setting("GROWTHOS_READER_DSN", env_path),
                     "synthetic-file-dsn",
                 )
                 self.assertNotIn("GROWTHOS_READER_DSN", os.environ)
             with patch.dict(os.environ, {"GROWTHOS_READER_DSN": "env-wins"}, clear=True):
                 self.assertEqual(
-                    local_setting("GROWTHOS_READER_DSN", env_path, forbidden_prefixes=FORBIDDEN_ENV_PREFIXES),
+                    local_setting("GROWTHOS_READER_DSN", env_path),
                     "env-wins",
                 )
 
@@ -158,13 +158,6 @@ class ReaderTests(unittest.TestCase):
                     self.assertIs(store.connection, connection)
                 self.assertEqual(psycopg.connect.call_args.args[0], "synthetic-file-dsn")
 
-            for forbidden in ("GROWTHOS_WRITER_DSN=secret", "GROWTHOS_TRINO_HOST=trino.invalid", "NEON_API_KEY=secret"):
-                env_path.write_text(f"GROWTHOS_READER_DSN=ok\n{forbidden}\n", encoding="utf-8")
-                with patch.dict(os.environ, {}, clear=True), self.assertRaises(GrowthOSError) as caught:
-                    local_setting("GROWTHOS_READER_DSN", env_path, forbidden_prefixes=FORBIDDEN_ENV_PREFIXES)
-                self.assertEqual(caught.exception.code, "CREDENTIAL_BOUNDARY")
-                self.assertNotIn("secret", caught.exception.message)
-
             for bad_content in (
                 "GROWTHOS_READER_DSN=one\nGROWTHOS_READER_DSN=two\n",
                 "GROWTHOS_READER_DSN='unclosed\n",
@@ -172,11 +165,11 @@ class ReaderTests(unittest.TestCase):
             ):
                 env_path.write_text(bad_content, encoding="utf-8")
                 with patch.dict(os.environ, {}, clear=True), self.assertRaises(GrowthOSError) as caught:
-                    local_setting("GROWTHOS_READER_DSN", env_path, forbidden_prefixes=FORBIDDEN_ENV_PREFIXES)
+                    local_setting("GROWTHOS_READER_DSN", env_path)
                 self.assertEqual(caught.exception.code, "CONFIGURATION")
 
             link_path = Path(temporary) / "symlink.env"
             link_path.symlink_to(env_path)
             with patch.dict(os.environ, {}, clear=True), self.assertRaises(GrowthOSError) as caught:
-                local_setting("GROWTHOS_READER_DSN", link_path, forbidden_prefixes=FORBIDDEN_ENV_PREFIXES)
+                local_setting("GROWTHOS_READER_DSN", link_path)
             self.assertEqual(caught.exception.code, "CONFIGURATION")

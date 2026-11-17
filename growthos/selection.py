@@ -1,8 +1,50 @@
 """Period selection, city matching and paired observations for IRF operations."""
 
+from dataclasses import dataclass
+
 from .classification import normalize_city_key
-from .contracts import TIERS, MonthlyData, month
+from .contracts import TIERS, MonthlyData, month, next_month
 from .errors import reject
+
+
+CityPair = tuple[dict, dict | None, dict | None]
+
+
+@dataclass(frozen=True)
+class PreparedComparison:
+    """Detached pair context; all_pairs stays unfiltered for overall evidence."""
+
+    data: dict
+    previous: str
+    latest: str
+    period_rows: list[dict]
+    all_pairs: list[CityPair]
+    pairs: list[CityPair]
+
+    @property
+    def label(self) -> str:
+        return "MoM" if next_month(month(self.previous)) == month(self.latest) else "period comparison"
+
+    @property
+    def reclassified(self) -> bool:
+        return _reclassified(self.pairs)
+
+
+def prepare_comparison(
+    dataset: MonthlyData,
+    previous: str | None = None,
+    latest: str | None = None,
+    *,
+    tier_filter: str | None = None,
+    cities: list[str] | None = None,
+) -> PreparedComparison:
+    """Select periods and pair once; tier_filter is already normalized by the caller."""
+    data = dataset.data
+    prev, curr = select_pair(dataset, previous, latest, data=data)
+    rows = [r for r in data["facts"] if r["month"] in (prev, curr)]
+    all_pairs = list(city_pairs(rows, prev, curr))
+    pairs = _filter_pairs(all_pairs, tier_filter=tier_filter, cities=cities)
+    return PreparedComparison(data, prev, curr, rows, all_pairs, pairs)
 
 
 def select_pair(dataset: MonthlyData, previous: str | None, latest: str | None, *, data: dict | None = None) -> tuple[str, str]:
@@ -74,17 +116,26 @@ def paired_cohort(
     *,
     tier_filter: str | None = None,
     cities: list[str] | None = None,
-) -> tuple[list[tuple[dict, dict | None, dict | None]], bool]:
+) -> tuple[list[CityPair], bool]:
     """Pair cities first so tier filters/cohorts use each city's latest observed tier."""
-    pairs = list(city_pairs(rows, previous, latest))
+    pairs = _filter_pairs(list(city_pairs(rows, previous, latest)), tier_filter=tier_filter, cities=cities)
+    return pairs, _reclassified(pairs)
+
+
+def _filter_pairs(
+    pairs: list[CityPair], *, tier_filter: str | None = None, cities: list[str] | None = None,
+) -> list[CityPair]:
     if tier_filter is not None:
         pairs = [p for p in pairs if p[0]["tier"] == tier_filter]
     if cities:
         cohort_rows = [r for _, prev_r, curr_r in pairs for r in (prev_r, curr_r) if r is not None]
         wanted = match_cities(cohort_rows, cities)
         pairs = [p for p in pairs if p[0]["city_key"] in wanted]
-    reclassified = any(
+    return pairs
+
+
+def _reclassified(pairs: list[CityPair]) -> bool:
+    return any(
         prev_r is not None and curr_r is not None and prev_r["tier"] != curr_r["tier"]
         for _, prev_r, curr_r in pairs
     )
-    return pairs, reclassified
