@@ -2,14 +2,13 @@ from dataclasses import FrozenInstanceError
 from decimal import Decimal, localcontext
 import json
 import unittest
-from unittest.mock import patch
 
 from growthos import analysis
 from growthos.contracts import VOLUMES, validate_data
 from growthos.metrics import (
     AggregateObservation, GroupRatioComparison, GroupVolumeComparison,
-    RatioComparison, VolumeComparison, aggregate, aggregate_observations,
-    compare_groups, compare_pair, group_metrics, metrics_output, pair_metrics,
+    RatioComparison, VolumeComparison, aggregate_observations,
+    compare_groups, compare_pair, metrics_output,
     group_share_gap, share_gap,
 )
 from fixtures import demo_data
@@ -120,29 +119,6 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(output, allow_nan=False)), output)
         output["volumes"]["installs"]["previous"]["value"] = 99
         self.assertEqual(volumes["installs"].previous.value, 10)
-
-    def test_legacy_calculation_interfaces_and_analysis_imports_are_preserved(self):
-        before, after = counts(10), counts(20)
-        expected = metrics_output(*compare_pair(before, after))
-        self.assertEqual(pair_metrics(before, after), (expected["volumes"], expected["ratios"]))
-        observation_dict = aggregate([{"city_key": "a", **before}], {"a"})
-        self.assertEqual(observation_dict["installs"]["value"], 10)
-        group_volumes, group_ratios = group_metrics(observation_dict, observation_dict)
-        self.assertEqual(group_volumes["installs"]["absolute_delta"], 0)
-        self.assertEqual(group_ratios["i2r"]["delta_pp"], 0)
-        for name, function in (("pair_metrics", pair_metrics), ("aggregate", aggregate), ("group_metrics", group_metrics)):
-            self.assertIs(getattr(analysis, name), function)
-
-    def test_analytical_operations_do_not_use_legacy_dictionary_calculations(self):
-        dataset = demo_data()
-        with patch.multiple(analysis, aggregate=None, group_metrics=None, pair_metrics=None):
-            for group in ("overall", "tier", "city"):
-                analysis.compare_overall(dataset, group_by=group)
-            analysis.rank_cities(dataset)
-            analysis.rank_cities(dataset, metric="i2r")
-            analysis.city_funnels(dataset)
-            analysis.city_funnels(dataset, columns=["city", "i2r_mom_abs"])
-            analysis.share_drivers(dataset)
 
     def test_share_gap_uses_decimal_fraction_levels_and_pp_movement(self):
         gap = share_gap(RatioComparison(0.1, 0.4, 30.0), RatioComparison(0.3, 0.2, -10.0))

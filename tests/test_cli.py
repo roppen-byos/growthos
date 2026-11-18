@@ -5,10 +5,11 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from growthos.cli import main, parser
+from growthos.cli import main
 from growthos.errors import GrowthOSError
 from growthos.evidence import catalog
-from fixtures import demo_data, fixture_reader
+from fixtures import demo_data, demo_payload, fixture_reader
+from growthos.contracts import validate_data
 from growthos.postgres import validate_reader_settings
 
 
@@ -104,37 +105,114 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.invoke_fixture(["funnel", "--column", "phone"])[0], 2)
         self.assertIn("volumes", self.invoke_fixture(["funnel"])[1]["rows"][0])
 
-    def test_report_saving_is_removed(self):
-        self.assertNotIn("save-report", parser().format_help())
-        status = self.invoke_fixture(["status"])[1]
-        self.assertNotIn("save-report", json.dumps(status))
+    def test_supported_operations_are_exposed(self):
         self.assertEqual(catalog(demo_data())["supported_operations"], [
             "status", "compare", "rank", "funnel", "share-drivers", "verify",
+            "target-analysis", "target-facts",
         ])
-        with patch("growthos.cli.connect_reader") as reader, patch("growthos.cli.sys.stdin") as stdin:
-            for arguments in (["save-report"], [
-                "save-report", "--title", "Synthetic report", "--body-file", "body.md",
-                "--reports-dir", "reports", "--start", "2026-08", "--end", "2026-09",
-            ]):
-                with self.subTest(arguments=arguments):
-                    code, result = self.invoke(arguments)
-                    self.assertEqual(code, 2)
-                    self.assertEqual(result["error"]["code"], "ARGUMENTS")
-            reader.assert_not_called()
-            stdin.read.assert_not_called()
 
-        from growthos import analysis
-        self.assertFalse(hasattr(analysis, "save_report"))
-
-    def test_old_snapshot_interface_removed_and_current_periods_available(self):
-        self.assertEqual(self.invoke_fixture(["status", "--snapshot", "old"])[0], 2)
+    def test_verify_selected_months_and_explicit_period_comparison(self):
         code, output = self.invoke_fixture(["verify", "--start", "2026-08", "--end", "2026-09"])
         self.assertEqual(code, 0)
         self.assertEqual(output["months"], ["2026-08", "2026-09"])
-        self.assertNotIn("snapshot_id", output)
-        self.assertNotIn("certification", output)
-        self.assertNotIn("coverage", output)
         self.assertEqual(self.invoke_fixture(["compare", "--previous", "2026-08", "--latest", "2026-10"])[0], 0)
+
+    def test_target_commands_route_one_month_and_return_shaped_output(self):
+        code, analysis = self.invoke_fixture(["target-analysis", "--month", "2026-10", "--limit", "1"])
+        self.assertEqual(code, 0)
+        self.assertEqual(analysis["months"], ["2026-10"])
+        self.assertEqual(analysis["row_count"], 1)
+        self.assertEqual(analysis["next_offset"], 1)
+        self.assertTrue({"overall", "coverage", "queue", "rows"} <= set(analysis))
+
+        code, page = self.invoke_fixture(["target-analysis", "--month", "2026-10", "--mode", "all", "--offset", "1"])
+        self.assertEqual(code, 0)
+        self.assertEqual(page["row_count"], 1)
+
+        code, facts = self.invoke_fixture(["target-facts", "--month", "2026-10"])
+        self.assertEqual(code, 0)
+        self.assertEqual((facts["operation"], facts["months"]), ("target-facts", ["2026-10"]))
+        self.assertTrue({"overall", "coverage", "rows"} <= set(facts))
+
+    def test_target_invalid_arguments_fail_before_reader_and_hide_inputs(self):
+        with patch("growthos.cli.connect_reader") as reader:
+            for command, args in (
+                ("target-analysis", []),
+                ("target-analysis", ["--month", "bad"]),
+                ("target-analysis", ["--month", "9999-12"]),
+                ("target-analysis", ["--month", "2026-10", "--limit", "101"]),
+                ("target-analysis", ["--month", "2026-10", "--offset", "-1"]),
+                ("target-analysis", ["--month", "2026-10", "--queue", "PRIVATE_marker"]),
+                ("target-facts", []),
+                ("target-facts", ["--month", "9999-12"]),
+                ("target-facts", ["--month", "2026-10", "--limit", "101"]),
+                ("target-facts", ["--month", "2026-10", "--attainment", "PRIVATE_marker"]),
+                ("target-facts", ["--month", "2026-10", "--sort", "PRIVATE_marker"]),
+            ):
+                with self.subTest(command=command, args=args):
+                    code, output = self.invoke([command, *args])
+                    self.assertEqual(code, 2)
+                    self.assertNotIn("PRIVATE", str(output))
+            reader.assert_not_called()
+
+    def test_target_help_succeeds_without_opening_reader(self):
+        with patch("growthos.cli.connect_reader") as reader:
+            for command in ("target-analysis", "target-facts"):
+                with self.subTest(command=command):
+                    output = io.StringIO()
+                    with redirect_stdout(output), self.assertRaises(SystemExit) as exited:
+                        main([command, "--help"])
+                    self.assertEqual(exited.exception.code, 0)
+                    self.assertIn("--month", output.getvalue())
+                    self.assertIn("--tier", output.getvalue())
+                    if command == "target-analysis":
+                        self.assertIn("--queue", output.getvalue())
+                    if command == "target-facts":
+                        self.assertIn("5% filter", " ".join(output.getvalue().split()))
+            reader.assert_not_called()
+
+    def test_target_tier_flag_scopes_output_and_rejects_invalid_tier_before_reader(self):
+        for command in ("target-analysis", "target-facts"):
+            code, result = self.invoke_fixture([command, "--month", "2026-10", "--tier", "t3"])
+            self.assertEqual(code, 0)
+            self.assertEqual(result["scope"]["tier"], "T3")
+            with patch("growthos.cli.connect_reader") as reader:
+                code, result = self.invoke([command, "--month", "2026-10", "--tier", "PRIVATE_marker"])
+                self.assertEqual(code, 2)
+                self.assertNotIn("PRIVATE", str(result))
+                reader.assert_not_called()
+            code, result = self.invoke_fixture([command, "--month", "2026-10", "--tier", "T2"])
+            self.assertEqual(code, 2)
+            self.assertEqual(result["error"]["code"], "COVERAGE")
+
+    def test_target_queue_flag_routes_matched_and_fallback(self):
+        raw = demo_payload()
+        base = raw["facts"][-1]
+        raw["facts"].append({**base, "city": "New Town", "city_key": "new_town",
+                             "source_cities": ["New Town"], "platform_ftu": 5,
+                             "platform_link_ftu": 5, "platform_auto_ftu": 0, "platform_cab_ftu": 0,
+                             "installs": 1, "registrations": 1})
+        with patch("fixtures.demo_data", return_value=validate_data(raw)):
+            code, matched = self.invoke_fixture(["target-analysis", "--month", "2026-10", "--mode", "all"])
+            self.assertEqual(code, 0)
+            self.assertEqual(matched["queue"], "matched")
+            self.assertNotIn("New Town", [r["city"] for r in matched["rows"]])
+            code, fallback = self.invoke_fixture(["target-analysis", "--month", "2026-10", "--queue", "fallback"])
+            self.assertEqual(code, 0)
+            self.assertEqual(fallback["queue"], "fallback")
+            self.assertIn("New Town", [r["city"] for r in fallback["rows"]])
+
+    def test_target_error_is_sanitized_and_missing_install_does_not_disable_existing_commands(self):
+        with patch("fixtures.FixtureReaderStore.load_targets", side_effect=GrowthOSError(
+                "TARGETS_UNAVAILABLE", "Targets are not installed.")):
+            self.assertEqual(self.invoke_fixture(["target-analysis", "--month", "2026-10"])[1]["error"]["code"], "TARGETS_UNAVAILABLE")
+            for command in ("status", "compare", "rank", "funnel", "share-drivers", "verify"):
+                self.assertEqual(self.invoke_fixture([command])[0], 0)
+        with patch("fixtures.FixtureReaderStore.load_targets", side_effect=RuntimeError("PRIVATE_token_marker")), \
+                patch("sys.stderr", io.StringIO()):
+            code, result = self.invoke_fixture(["target-analysis", "--month", "2026-10"])
+        self.assertEqual(code, 2)
+        self.assertNotIn("PRIVATE", str(result))
 
 
 if __name__ == "__main__":

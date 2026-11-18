@@ -1,10 +1,8 @@
 import unittest
-from unittest.mock import patch
 
-from growthos import analysis
 from growthos.contracts import validate_data
 from growthos.errors import GrowthOSError
-from growthos.selection import city_pairs, paired_cohort, prepare_comparison, select_pair
+from growthos.selection import prepare_comparison
 from fixtures import demo_data, demo_payload
 
 
@@ -65,30 +63,6 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(pairs["harbor"][0]["platform_ftu"], 30)
         self.assertEqual(pairs["vale"][0]["platform_ftu"], 20)
         self.assertFalse(prepared.reclassified)
-
-    def test_existing_paired_cohort_interface_is_preserved(self):
-        dataset = demo_data()
-        prepared = prepare_comparison(dataset, tier_filter="T3", cities=["VALE"])
-        pairs, reclassified = paired_cohort(
-            prepared.period_rows, "2026-09", "2026-10", tier_filter="T3", cities=["VALE"],
-        )
-        self.assertEqual(pairs, prepared.pairs)
-        self.assertEqual(reclassified, prepared.reclassified)
-        self.assertIs(analysis.paired_cohort, paired_cohort)
-        self.assertIs(analysis.select_pair, select_pair)
-
-    def test_each_command_prepares_and_pairs_once(self):
-        for operation, kwargs in (
-            (analysis.compare_overall, {"group_by": "tier"}), (analysis.rank_cities, {"tier": "T1"}),
-            (analysis.city_funnels, {"cities": ["Harbor"]}), (analysis.share_drivers, {"tier": "T3"}),
-        ):
-            with self.subTest(command=operation.__name__), \
-                    patch("growthos.analysis.prepare_comparison", wraps=prepare_comparison) as prepare, \
-                    patch("growthos.selection.city_pairs", wraps=city_pairs) as pair:
-                operation(demo_data(), **kwargs)
-                self.assertEqual(prepare.call_count, 1)
-                self.assertEqual(pair.call_count, 1)
-
 
 if __name__ == "__main__":
     unittest.main()

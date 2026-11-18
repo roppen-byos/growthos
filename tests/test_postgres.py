@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 import json
 import os
 from pathlib import Path
@@ -8,8 +8,10 @@ from unittest.mock import MagicMock, patch
 
 from growthos.contracts import FACT_FIELDS, checksum, month, validate_data
 from growthos.errors import GrowthOSError
+from growthos.evidence import CITY_PAGE_SIZE
 from growthos.postgres import PostgresStore, assert_reader_permissions, connect_reader, local_setting
-from fixtures import FixtureReaderStore, demo_data, demo_payload
+from fixtures import FixtureReaderStore, demo_data, demo_payload, demo_targets
+from growthos.targets import TARGET_DB_FIELDS
 
 
 class ReaderTests(unittest.TestCase):
@@ -32,7 +34,7 @@ class ReaderTests(unittest.TestCase):
         for offset in (0, 25, 32, 100, 20_001):
             with self.subTest(offset=offset):
                 connection, cursor = self.connection()
-                cursor.fetchall.side_effect = [metadata, cities[offset:offset + 25], [("T1",), ("T2",), ("T3",)]]
+                cursor.fetchall.side_effect = [metadata, cities[offset:offset + CITY_PAGE_SIZE], [("T1",), ("T2",), ("T3",)]]
                 cursor.fetchone.return_value = (len(cities),)
                 store = PostgresStore(connection, allow_nonproduction=True)
                 actual = store.catalog(offset)
@@ -45,12 +47,12 @@ class ReaderTests(unittest.TestCase):
                 self.assertEqual(actual["fact_count"], len(data["facts"]))
                 self.assertEqual(len(actual["warnings"]), 2)
                 self.assertNotIn("result_checksum", actual)
-                self.assertLessEqual(len(actual["cities"]), 25)
+                self.assertLessEqual(len(actual["cities"]), CITY_PAGE_SIZE)
                 calls = cursor.execute.call_args_list
                 self.assertEqual(len(calls), 4)
                 self.assertIn("DISTINCT ON (city_key)", calls[2].args[0])
                 self.assertIn("ORDER BY city_key, month DESC", calls[2].args[0])
-                self.assertIn("LIMIT 25 OFFSET %s", calls[2].args[0])
+                self.assertIn(f"LIMIT {CITY_PAGE_SIZE} OFFSET %s", calls[2].args[0])
                 self.assertEqual(calls[2].args[1], (offset,))
                 cursor.fetchmany.assert_not_called()
 
@@ -114,6 +116,40 @@ class ReaderTests(unittest.TestCase):
             with self.assertRaises(GrowthOSError) as caught:
                 assert_reader_permissions(connection)
             self.assertEqual(caught.exception.code, "READ_ONLY_ROLE")
+
+    def test_target_read_is_bounded_checked_and_matches_fixture(self):
+        target = demo_targets()
+        data = target.data
+        records = [{**r, "month": month(r["month"]), "source_checksum": data["source_checksum"],
+                    "imported_at": datetime.fromisoformat(data["imported_at"]),
+                    "month_checksum": target.result_checksum, "month_row_count": len(data["rows"])} for r in data["rows"]]
+        connection, cursor = self.connection()
+        cursor.fetchone.side_effect = [("irf.pftu_targets",), (True,)]
+        cursor.fetchmany.return_value = [tuple(r[k] for k in TARGET_DB_FIELDS) for r in records]
+        result = PostgresStore(connection).load_targets("2026-10")
+        self.assertEqual(result, FixtureReaderStore(demo_data()).load_targets("2026-10"))
+        query, params = cursor.execute.call_args.args
+        self.assertIn("WHERE month=%s", query)
+        self.assertIn("LIMIT %s", query)
+        self.assertEqual(params, (date(2026, 10, 1), 20_001))
+        cursor.fetchmany.assert_called_once_with(20_001)
+
+    def test_target_permissions_missing_install_and_integrity_fail_closed(self):
+        for replies, code in (([(None,)], "TARGETS_UNAVAILABLE"),
+                              ([("irf.pftu_targets",), (False,)], "READ_ONLY_ROLE"),
+                              ([("irf.pftu_targets",), (None,)], "READ_ONLY_ROLE")):
+            connection, cursor = self.connection()
+            cursor.fetchone.side_effect = replies
+            with self.subTest(replies=replies), self.assertRaises(GrowthOSError) as caught:
+                PostgresStore(connection).load_targets("2026-10")
+            self.assertEqual(caught.exception.code, code)
+            cursor.fetchmany.assert_not_called()
+        connection, cursor = self.connection()
+        cursor.fetchone.side_effect = [("irf.pftu_targets",), (True,)]
+        cursor.fetchmany.return_value = []
+        with self.assertRaises(GrowthOSError) as caught:
+            PostgresStore(connection).load_targets("2026-10")
+        self.assertEqual(caught.exception.code, "TARGETS_UNAVAILABLE")
 
     def test_connection_keeps_read_only_transaction_and_closes_on_failure(self):
         connection, cursor = self.connection()
