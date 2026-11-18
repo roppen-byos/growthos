@@ -13,7 +13,7 @@ from .analysis import (
     target_cities,
     target_facts,
 )
-from .contracts import month_range, validate_data
+from .contracts import month_range, previous_month, validate_data
 from .errors import DiagnosticStage, MAX_OUTPUT_BYTES, SafeParser, diagnostic_stage, execute_cli, reject
 from .evidence import provenance
 from .metrics import ALL_METRICS
@@ -150,6 +150,16 @@ def analyze(args, dataset):
     }
 
 
+def load_target_context(store, period: str):
+    """Read the selected month and, when evaluable, the immediately previous month."""
+    targets = store.load_targets(period)
+    prior = previous_month(period)
+    evaluable = prior in store.target_months() and prior in store.available_months()
+    if not evaluable:
+        return store.load([period]), targets, None
+    return store.load([prior, period]), targets, store.load_targets(prior)
+
+
 def run(args) -> dict:
     if args.command in TARGET_COMMANDS:
         with diagnostic_stage(DiagnosticStage.ARGUMENTS):
@@ -165,18 +175,20 @@ def run(args) -> dict:
                 with diagnostic_stage(DiagnosticStage.CATALOG):
                     return store.catalog(args.city_offset)
             with diagnostic_stage(DiagnosticStage.LOAD):
-                dataset = store.load(requested_months(args))
                 if args.command in TARGET_COMMANDS:
-                    targets = store.load_targets(args.month)
+                    dataset, targets, previous_targets = load_target_context(store, args.month)
+                else:
+                    dataset = store.load(requested_months(args))
             with diagnostic_stage(DiagnosticStage.ANALYSIS):
                 if args.command == "target-analysis":
                     return target_cities(dataset, targets, args.month, mode=args.mode,
                                          offset=args.offset, limit=args.limit, tier=args.tier,
-                                         queue=args.queue)
+                                         queue=args.queue, previous_targets=previous_targets)
                 if args.command == "target-facts":
                     return target_facts(dataset, targets, args.month, cities=args.city or None,
                                         attainment=args.attainment, sort_by=args.sort,
-                                        descending=args.descending, offset=args.offset, limit=args.limit, tier=args.tier)
+                                        descending=args.descending, offset=args.offset, limit=args.limit, tier=args.tier,
+                                        previous_targets=previous_targets)
                 return analyze(args, dataset)
 
 

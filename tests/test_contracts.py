@@ -134,11 +134,13 @@ class ContractTests(unittest.TestCase):
 
         targets = store["targets"]
         self.assertEqual(set(targets), {
-            "platform_ftu_target", "target_shortfall", "shortfall_percentage", "target_shortlist"})
+            "platform_ftu_target", "target_shortfall", "shortfall_percentage", "target_shortlist",
+            "target_persistence"})
         self.assertEqual(set(targets["platform_ftu_target"]["components"]), {
             "grand_total", "city_target", "new_launch_fallback"})
         self.assertEqual(targets["target_shortfall"]["formula"], "target - actual")
         self.assertIn("5%", targets["target_shortlist"]["eligibility"])
+        self.assertIn("5 percentage points", targets["target_persistence"]["comparison"])
 
         defs = definitions()
         for key in (*ALL_METRICS, "absolute_delta", "growth_fraction", "delta_pp", "link_vs_auto_share_gap", "glossary_distinctions", "rules"):

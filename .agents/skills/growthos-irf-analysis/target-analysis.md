@@ -1,15 +1,14 @@
 # Ended-month Platform FTU targets
 
-Use this branch for target attainment, not month-on-month performance. Codex
-chooses tools and parameters from the user's intent; examples are not exact-phrase
-rules or an exhaustive list of supported questions. All arithmetic, predicates,
-ordering, reconciliation and coverage selection belong to reviewed Python tools.
+Use this branch for target attainment, not month-on-month performance. Choose tools
+and parameters by intent; examples are neither exact-phrase rules nor exhaustive.
+Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation and coverage selection.
 
 ## Workflow
 
 1. **Select the month.** Resolve one explicit ended month from the question or
-   established conversation. If unresolved, ask which month. Use `status` to check
-   actual availability; target availability is checked by the target command.
+   conversation; otherwise, ask which month. Use `status` to check actual availability;
+   the target command checks target availability.
    An unavailable month stays unavailable, without substitution or invented targets.
    If a tier is requested, pass `--tier T1|T2|T3` to the selected target tool. It
    uses that month's stored city tiers, not CSV tags or a previous month's tier.
@@ -25,21 +24,19 @@ ordering, reconciliation and coverage selection belong to reviewed Python tools.
    | Inspect the pooled New launch fallback comparison and its city breakdown | `target-analysis --queue fallback` |
 
    General facts have **no implicit 5% filter** or coverage stop. Plain “cities
-   missing targets” retains the agreed >5% policy via analysis/all; an explicit
+   missing targets” retains the agreed >5% policy via target-analysis in all mode; an explicit
    request for any miss, small misses, equality or exceeded targets uses facts.
    “Top cities” in the agreed intervention workflow retains coverage-based
    selection. For a factual fixed-N ranking, use facts with the requested sort
    and page size and label the displayed subset/count, not a coverage shortlist.
    Clarify only genuinely ambiguous criteria; do not reinterpret a fixed-N list
    as cumulative coverage. Combine reviewed target and MoM/funnel tools when the
-   question actually requests both, keeping the evidence and criteria separate.
-   Target analysis returns the **plan-matched queue** (cities with an explicit
-   city target) by default. It always reports the **pooled New launch fallback
-   comparison** for unplanned cities (their combined actual versus the single New
-   launch target); those cities are never ranked inside the plan-matched queue and
-   have no individual target. When `fallback.city_count` is nonzero, disclose the
-   pooled target/actual/shortfall and ask whether the user wants the actual-only
-   city breakdown before running `--queue fallback`.
+   question requests both, keeping the evidence and criteria separate.
+   Target analysis defaults to the **plan-matched queue** (cities with an explicit
+   city target). It always reports the **pooled New launch fallback comparison**
+   for unplanned cities, separately from that ranking. When `fallback.city_count`
+   is nonzero, disclose the pooled target/actual/shortfall and ask whether the user
+   wants the actual-only city breakdown before running `--queue fallback`.
 3. **Read evidence.** Select the matching command and parameters, for example:
    ```bash
    .venv/bin/python -m growthos target-facts --month YYYY-MM --city Delhi
@@ -50,7 +47,7 @@ ordering, reconciliation and coverage selection belong to reviewed Python tools.
    .venv/bin/python -m growthos target-analysis --month YYYY-MM --tier T3 --queue fallback
    .venv/bin/python -m growthos target-facts --month YYYY-MM --tier T2 --city Jaipur
    ```
-   Use the needed tools, not every example by default. Follow `next_offset` using
+   Run only the needed tools. Follow `next_offset` using
    `--offset OFFSET`; `--limit` controls only page size, not matching/selection.
    If a page hits `OUTPUT_BOUND`, reduce `--limit` and retry the same offset.
    Done when evidence covers the requested scope: for an exhaustive facts query,
@@ -59,28 +56,33 @@ ordering, reconciliation and coverage selection belong to reviewed Python tools.
    with returned/total counts. Compare actual `result_checksum`, month metadata
    and `target_provenance` across pages; if they change, restart collection.
 4. **Answer.** Follow [output-format.md](output-format.md). Lead with the month,
-   overall target, actual, overall shortfall and the requested city/query scope.
+   overall target/actual/shortfall and the requested city/query scope.
    With `scope.tier` present, label these **tier target/actual/gap**, not national
    totals. Coverage means the selected tier's own gap; report that tier's skipped
    null counts and the tool's target-source/reconciliation caveat.
    Include the tool's city, target, actual, shortfall and shortfall %. For selection,
    also include cumulative shortfall, coverage, uncovered amount and overshoot.
-   Preserve exact ordering and disclose missing-value reasons/exclusions, the
-   plan-matched queue versus the separate pooled New launch fallback comparison,
-   reconciliation differences and actual/target provenance. Report the pooled
+   Preserve exact ordering and disclose missing-value reasons/exclusions,
+   reconciliation differences and actual/target provenance. Report the separate pooled
    fallback target/actual/shortfall (`fallback.*`), `fallback.city_count`,
-   `fallback.skipped_null_city_count` and `fallback.qualifies` beside the matched
+   `fallback.skipped_null_city_count` and `fallback.qualifies` beside the plan-matched
    result, and ask before listing the actual-only fallback breakdown.
+   When `persistent_failure.available` is true, render its `rows` as a second
+   table headed “Also failing in <previous_month> — shortfall widened >5pp”, with
+   city, current shortfall %, previous shortfall %, change in pp and
+   `failing_since`. Report `city_count` and `undetermined_city_count` beside it.
+   This is additive: never replace, reorder or filter the main shortlist because
+   of it. If `available` is false, state the returned reason and do not show the
+   table; if `city_count` is zero, say no returned city also widened by >5pp.
+   The object annotates only the returned page, so re-check it after paging.
    When `overall.actual_coverage.skipped_null_ftu_city_count` is nonzero, disclose
    that count beside the headline: these cities were skipped in overall recorded
-   FTU, not converted to zero. Use `install_or_registration_only_city_count` for
-   the subset with only IR metrics. For example, only when both counts equal 477:
-   “477 cities had null FTU data and only installs or registrations recorded;
-   excluded from the overall actual calculation.” If other null patterns exist,
-   report their separate count rather than claiming all skipped cities were IR-only.
+   Platform FTU, not converted to zero. Use `install_or_registration_only_city_count`
+   for the subset with only Installs or Registrations. If other null patterns exist,
+   report their counts separately rather than claiming all skipped cities had only Installs or Registrations.
    `shortfall_pct` is already a percentage; append `%` without multiplying again.
    `shortfall = target - actual`: a miss has a positive shortfall; preserve the
-   returned sign rather than formatting it as actual-minus-target movement.
+   returned sign, not actual-minus-target movement.
    For all-city requests, deliver every selected row, in clearly labeled batches
    if needed. If delivery is incomplete, state returned/total counts and never
    describe it as the complete list. Do not save/export reports as a substitute.
@@ -102,7 +104,7 @@ ordering, reconciliation and coverage selection belong to reviewed Python tools.
 - Without a tier filter, the overall target is the supplied **Grand Total**. The command calculates
   X = max(overall target - recorded overall actual, 0). Recorded actual is the sum
   of non-null city `platform_ftu` values; null-FTU cities are skipped and disclosed.
-  This is the approved observed-data basis, not certified complete national FTU.
+  This is the approved observed-data basis, not certified complete national Platform FTU.
   Nonzero skipped/unavailable city counts do not block a numeric X under this
   policy. Use `overall.actual`, `overall.shortfall` and their explicit unavailable
   reason; do not relabel them N/A merely because some city FTU values are null.
@@ -112,13 +114,12 @@ ordering, reconciliation and coverage selection belong to reviewed Python tools.
   month. Tier target and actual use only **plan-matched cohort cities** (those
   with an explicit city target), including approved merges and targets retained
   for null-FTU cities. Unplanned cities are outside that calculation and are
-  reported separately as the pooled New launch fallback. The command selects against that
+  reported as the separate pooled New launch fallback comparison. The command selects against the
   **tier's own plan-matched gap**. National Grand Total is not allocated or used
   for this calculation; summed tier targets need not match it. A tier whose cohort
   has no plan-matched city keeps target/actual/X unavailable rather than inventing
   zero. Do not infer tiers for planned cities with no stored row that month.
-  Ludhiana's T2-source target does not retier its actual observation. An empty
-  tier raises a coverage limitation, not invented zero totals.
+  An empty tier raises a coverage limitation, not invented zero totals.
 - Top mode stops when cumulative shortfall covers X, permitting overshoot. It
   returns an empty shortlist when X=0; if eligible gaps cannot cover X, the
   uncovered amount remains explicit. All mode returns all qualifying cities even
@@ -135,6 +136,17 @@ ordering, reconciliation and coverage selection belong to reviewed Python tools.
   actual-only city breakdown. The fallback is a planning assumption, not proof of
   launch, an allocation or a shared per-city budget. Explicit missing/zero plan
   targets do not join the pool.
+- The additive `persistent_failure` object lists currently returned material misses
+  that were also strictly >5% below their own positive explicit city target in the
+  immediately previous calendar month and whose shortfall percentage widened by
+  more than 5 percentage points. It uses exact integer arithmetic before display
+  rounding. A city failing both months but improving is not listed. Missing prior
+  city/target/actual and nonpositive prior targets are undetermined, not failures.
+  Only the returned page is annotated; above/at/unavailable facts and pooled
+  fallback cities never appear. With `--tier`, the selected month's stored tier is
+  the only tier source; prior-month tier need not match. If no prior month has both
+  targets and actuals, `available` is false with an explicit reason. Never describe
+  the list as every persistent miss.
 - Attingal target + Trivandrum target is the canonical Trivandrum target; actuals
   already use that city. Ludhiana uses the source's T2 target row while its actual
   tier remains unchanged. Use returned evidence rather than redoing these joins.

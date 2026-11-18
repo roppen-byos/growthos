@@ -8,11 +8,11 @@ description: Guide GrowthOS analyst installation, local reporting-connection set
 ## Boundaries
 
 Follow repository-root [AGENTS.md](../../../AGENTS.md) for credentials and command
-approval. Work entirely in this analyst folder. Run installation and checks for
-the user; ask them only for local actions you cannot safely perform.
+approval. Work entirely in this analyst folder. Run installation and checks;
+ask the user only for local actions you cannot safely perform.
 
 Credentials stay local: the only permitted `.env` write is copying the blank
-`.env.example` when `.env` is absent, as described below. Never inspect, edit,
+`.env.example` when `.env` is absent. Never inspect, edit,
 display or source `.env`, dump environment variables, or ask for a connection
 string in chat. The reviewed CLI may load its own settings.
 
@@ -21,7 +21,7 @@ string in chat. The reviewed CLI may load its own settings.
 1. **Check the runtime.** Work from the repository root. Use `.venv/bin/python`
    if present and runnable; check its version against `pyproject.toml`. Otherwise
    check `python3 --version`, then create `.venv` using the README's setup command.
-   Reuse a working environment; preserve an existing broken `.venv` and report
+   Reuse a working environment; preserve a broken `.venv` and report
    the blocker rather than deleting or overwriting it. If Python is absent,
    too old, or lacks `venv`, give the platform-appropriate local prerequisite and
    wait for the user before retrying. Do not install system packages automatically.
@@ -33,7 +33,7 @@ string in chat. The reviewed CLI may load its own settings.
    unavailable or denied, stop with the blocker. Use normal package verification
    rather than disabling TLS or changing package indexes to bypass an error.
 3. **Prepare local configuration.** If the user needs to configure the connection,
-   run this command yourself from the project root. It creates a private `.env`
+   run this command from the repository root. It creates a private `.env`
    only when absent; preserve existing files and symlinks without reading them.
 
    ```bash
@@ -51,15 +51,15 @@ string in chat. The reviewed CLI may load its own settings.
    the user already configured the connection.
 4. **Check the connection.** Run `.venv/bin/python -m growthos status` through
    the host approval mechanism required by AGENTS.md. Use only its sanitized
-   result. On failure, follow the recovery table below. When the user must act,
+   result. On failure, follow the recovery table. When the user must act,
    explain one next action, wait for confirmation, then retry the affected check.
    Do not repeat a failing command without a relevant change.
 5. **Close with evidence.** Say setup is ready only when package checks and
-   `status` succeed. State whether stored months are available and mention any
-   returned warnings; an empty catalog means connected, but no reporting data
-   is available yet. A successful connection does not certify data freshness or
-   completeness. If blocked, distinguish an installed runtime from an unverified
-   connection. Stop here: no automatic report, question bank, or saved setup state.
+   `status` succeed. State whether stored months are available and report returned
+   warnings; an empty catalogue means connected without reporting data. Connection
+   success does not certify data freshness or completeness. If blocked, distinguish
+   an installed runtime from an unverified connection. Stop here: no automatic
+   report, question bank, or saved setup state.
 
 ## Connection recovery
 

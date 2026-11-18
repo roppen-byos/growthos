@@ -48,8 +48,11 @@ def demo_data() -> MonthlyData:
 class FixtureReaderStore:
     """Read-only double mirroring the subset of ``PostgresStore`` the CLI uses."""
 
-    def __init__(self, data: MonthlyData):
+    def __init__(self, data: MonthlyData, target_months: list[str] | None = None):
         self._data = data
+        self._target_months = (
+            list(data.data["months"][1:]) if target_months is None else list(target_months)
+        )
 
     def available_months(self) -> list[str]:
         return list(self._data.data["months"])
@@ -78,6 +81,9 @@ class FixtureReaderStore:
 
     def load_targets(self, value: str):
         return demo_targets(value)
+
+    def target_months(self) -> list[str]:
+        return list(self._target_months)
 
 
 def demo_targets(value="2026-10"):

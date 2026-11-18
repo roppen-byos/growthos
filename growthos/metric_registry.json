@@ -293,6 +293,16 @@
       "match_queue": "Default plan-matched queue: cities with an explicit city target in the plan, selected and ranked on their own.",
       "fallback_queue": "Unplanned cities are excluded from the default queue and returned only on explicit request as one pooled comparison of their non-null Platform FTU sum against the single New launch target, with an actual-only per-city breakdown. Every unplanned city has no individual target or shortfall.",
       "tier_scope": "For a tier, the target, actual and gap use only plan-matched cohort cities; unplanned cities stay outside that tier calculation and are reported separately as the national New launch pool. National Grand Total reporting is unchanged."
+    },
+    "target_persistence": {
+      "id": "target_persistence",
+      "label": "Persistent Target Miss (Widening Shortfall)",
+      "definition": "Annotation of a currently returned material target miss whose gap also widened against the immediately previous stored month.",
+      "eligibility": "A currently returned plan-matched city must be strictly more than 5% below its own positive target in the selected month and also strictly more than 5% below its own positive explicit city target in the immediately previous calendar month.",
+      "comparison": "Listed only when current shortfall percentage minus previous shortfall percentage is strictly greater than 5 percentage points, evaluated with exact integer arithmetic before display rounding.",
+      "scope": "Only currently returned page cities with an explicit plan city target are checked; pooled New launch fallback cities have no individual target and are never annotated.",
+      "tier_scope": "The selected month's stored tier is the only tier source; the prior month's tier is not required to match.",
+      "limits": "A city that missed both months but improved is not listed. Absence is not evidence that a city met earlier targets or that the prior month was complete."
     }
   },
   "glossary_distinctions": {

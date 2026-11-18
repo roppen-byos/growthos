@@ -287,7 +287,7 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
         reject("SCHEMA", "Invalid link_vs_auto_share_gap definition in metric registry.")
 
     targets = payload["targets"]
-    target_keys = {"platform_ftu_target", "target_shortfall", "shortfall_percentage", "target_shortlist"}
+    target_keys = {"platform_ftu_target", "target_shortfall", "shortfall_percentage", "target_shortlist", "target_persistence"}
     if not isinstance(targets, dict) or set(targets) != target_keys:
         reject("SCHEMA", "Metric registry targets do not match the approved target definitions.")
     for target_id, entry in targets.items():
@@ -313,6 +313,11 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
     for field in ("eligibility", "ordering", "coverage_selection", "match_queue", "fallback_queue", "tier_scope"):
         if not _long_text(shortlist.get(field)):
             reject("SCHEMA", "Invalid target shortlist rule in metric registry.")
+
+    persistence = targets["target_persistence"]
+    for field in ("eligibility", "comparison", "scope", "tier_scope", "limits"):
+        if not _long_text(persistence.get(field)):
+            reject("SCHEMA", "Invalid target persistence rule in metric registry.")
 
     glossary = payload["glossary_distinctions"]
     if not isinstance(glossary, dict) or set(glossary) != {"svn", "rr2net"}:

@@ -150,6 +150,18 @@ class PostgresStore:
                 reject("READ_ONLY_ROLE", "Target analysis requires SELECT-only access to PFTU targets.")
         return read_target_month(self.connection, value)
 
+    def target_months(self) -> list[str]:
+        """Bounded set of stored target months; caller enforces table permissions first."""
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass('irf.pftu_targets')")
+            if cursor.fetchone() == (None,):
+                return []
+            cursor.execute(
+                "SELECT DISTINCT month FROM irf.pftu_targets ORDER BY month LIMIT %s",
+                (MAX_MONTHS + 1,),
+            )
+            return [row[0].isoformat()[:7] for row in cursor.fetchmany(MAX_MONTHS + 1)]
+
     def load(self, months: list[str] | None = None):
         selected = self.available_months()[-2:] if months is None else months
         if not selected or len(selected) > MAX_MONTHS:

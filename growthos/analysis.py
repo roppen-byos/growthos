@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from .classification import CANONICAL_CITIES
-from .contracts import RATIOS, TIERS, VOLUMES, MonthlyData
+from .contracts import RATIOS, TIERS, VOLUMES, MonthlyData, previous_month
 from .errors import reject
 # Preserve existing public imports; new callers use the owning modules.
 from .evidence import MISSING_TOTALS_WARNING, TIER_RECLASSIFIED_WARNING, catalog, provenance
@@ -30,6 +30,12 @@ SERVICE_MAP = {
     "cab": ("platform_cab_ftu", "cab_share"),
     "all": ("platform_ftu", "link_share"),
 }
+
+
+PERSISTENCE_CRITERIA = (
+    "current and previous month each strictly >5% below their own positive city target, "
+    "and current_shortfall_pct - previous_shortfall_pct > 5 percentage points"
+)
 
 
 def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
@@ -189,14 +195,112 @@ def _rank_target_rows(rows: list[dict]) -> tuple[list[dict], dict[str, int]]:
     return eligible, excluded
 
 
+def _persistent_failure(
+    page_rows: list[dict], dataset: MonthlyData, previous_targets: TargetMonth | None,
+    period: str, *, tier: str | None = None, queue: str = "matched",
+) -> dict:
+    """Annotate a page with cities whose material miss also widened against the prior month."""
+    prior = previous_month(period)
+    excluded = {
+        "missing_prior_city_observation": 0, "missing_prior_target": 0,
+        "nonpositive_prior_target": 0, "missing_prior_actual": 0,
+        "prior_not_above_5_percent": 0, "shortfall_pct_delta_not_above_5": 0,
+    }
+    result = {
+        "available": False, "previous_month": prior, "criteria": PERSISTENCE_CRITERIA,
+        "rows": [], "page_city_count": len(page_rows), "checked_city_count": 0,
+        "not_currently_qualifying_city_count": 0, "city_count": 0,
+        "undetermined_city_count": 0, "excluded_city_counts": excluded, "warnings": [],
+    }
+    if queue == "fallback":
+        result["reason"] = "pooled_fallback_has_no_city_targets"
+        result["warnings"].append(
+            "Pooled New launch fallback cities have no individual target, so no per-city persistence table is available.")
+        return result
+    if previous_targets is None:
+        result["reason"] = "no_previous_month_with_targets_and_actuals"
+        result["warnings"].append(
+            "No preceding stored month has both Platform FTU actuals and targets, so prior-month persistence cannot be evaluated.")
+        return result
+    if previous_targets.data["month"] != prior:
+        reject("COVERAGE", "Prior targets must describe the immediately previous calendar month.")
+    data = dataset.data
+    if prior not in data["months"]:
+        result["reason"] = "no_previous_month_with_targets_and_actuals"
+        result["warnings"].append(
+            "The prior month's actuals were not read with this request, so persistence cannot be evaluated.")
+        return result
+    prior_facts = {r["city_key"]: r for r in data["facts"] if r["month"] == prior}
+    prior_explicit = {r["city_key"]: r for r in previous_targets.data["rows"] if r["kind"] == "city"}
+    rows, checked = [], 0
+    for row in page_rows:
+        target, actual = row["target"], row["actual"]
+        current_shortfall = None if target is None or actual is None else target - actual
+        if current_shortfall is None or target <= 0 or 20 * current_shortfall <= target:
+            continue
+        checked += 1
+        key = row["city_key"]
+        fact = prior_facts.get(key)
+        target_row = prior_explicit.get(key)
+        prior_target = target_row["target"] if target_row else None
+        if fact is None:
+            reason = "missing_prior_city_observation"
+        elif prior_target is None:
+            reason = "missing_prior_target"
+        elif prior_target <= 0:
+            reason = "nonpositive_prior_target"
+        elif fact["platform_ftu"] is None:
+            reason = "missing_prior_actual"
+        else:
+            prior_shortfall = prior_target - fact["platform_ftu"]
+            if 20 * prior_shortfall <= prior_target:
+                reason = "prior_not_above_5_percent"
+            elif 20 * current_shortfall * prior_target - 20 * prior_shortfall * target <= target * prior_target:
+                reason = "shortfall_pct_delta_not_above_5"
+            else:
+                reason = None
+        if reason is None:
+            current_pct = 100 * current_shortfall / target
+            prior_pct = 100 * prior_shortfall / prior_target
+            rows.append({
+                "city_key": key, "city": row["city"],
+                "current_shortfall_pct": current_pct,
+                "previous_shortfall_pct": prior_pct,
+                "shortfall_pct_delta": current_pct - prior_pct,
+                "failing_since": prior,
+            })
+        else:
+            excluded[reason] += 1
+    undetermined = sum(excluded[k] for k in (
+        "missing_prior_city_observation", "missing_prior_target",
+        "nonpositive_prior_target", "missing_prior_actual"))
+    result.update({
+        "available": True, "rows": rows, "checked_city_count": checked,
+        "not_currently_qualifying_city_count": len(page_rows) - checked,
+        "city_count": len(rows), "undetermined_city_count": undetermined,
+    })
+    result["warnings"].append(
+        "Persistence requires the shortfall percentage to widen by more than 5 percentage points; "
+        "a city that missed both months but improved is not listed.")
+    if undetermined:
+        result["warnings"].append(
+            f"{undetermined} returned cities could not be compared with {prior} because an explicit prior target or actual was unavailable.")
+    if tier:
+        result["warnings"].append(
+            "Prior-month evaluation is per city; the prior month's stored tier is not required to match the selected month's tier.")
+    return result
+
+
 def target_cities(dataset: MonthlyData, targets: TargetMonth, period: str, *,
                   mode: str = "top", offset: int = 0, limit: int = 25,
-                  tier: str | None = None, queue: str = "matched") -> dict:
+                  tier: str | None = None, queue: str = "matched",
+                  previous_targets: TargetMonth | None = None) -> dict:
     """Rank and select one queue: plan-matched city targets, or the New launch fallback."""
     validate_target_request(period, mode, offset, limit)
     if queue not in ("matched", "fallback"):
         reject("ARGUMENTS", "Target analysis queue must be matched or fallback.")
-    result, rows, counts = _target_evidence(dataset, targets, period, tier=normalize_tier(tier))
+    tier_filter = normalize_tier(tier)
+    result, rows, counts = _target_evidence(dataset, targets, period, tier=tier_filter)
     x = result["overall"]["shortfall"]
     matched_rows = [r for r in rows if r["target_source"] == "city"]
     fallback_rows = [r for r in rows if r["target_source"] == "new_launch"]
@@ -243,13 +347,16 @@ def target_cities(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         "omitted_row_count": len(items) - len(page),
     })
     result["warnings"].append("Shortfall coverage is arithmetic, not guaranteed recoverable FTU or a causal recommendation.")
+    result["persistent_failure"] = _persistent_failure(
+        page, dataset, previous_targets, period, tier=tier_filter, queue=queue)
     return result
 
 
 def target_facts(dataset: MonthlyData, targets: TargetMonth, period: str, *,
                  cities: list[str] | None = None, attainment: str = "all",
                  sort_by: str = "city", descending: bool = False,
-                 offset: int = 0, limit: int = 25, tier: str | None = None) -> dict:
+                 offset: int = 0, limit: int = 25, tier: str | None = None,
+                 previous_targets: TargetMonth | None = None) -> dict:
     """General target observations; no implicit 5% filter or overall-gap stop."""
     validate_target_facts_request(period, attainment, sort_by, descending, offset, limit)
     tier_filter = normalize_tier(tier)
@@ -279,6 +386,8 @@ def target_facts(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         result["warnings"].append("City filters and attainment predicates do not redefine the selected tier's month-wide totals; facts have no implicit 5% filter.")
     else:
         result["warnings"].append("City filters and attainment predicates do not redefine month-wide overall totals; facts have no implicit 5% filter.")
+    result["persistent_failure"] = _persistent_failure(
+        page, dataset, previous_targets, period, tier=tier_filter)
     return result
 
 

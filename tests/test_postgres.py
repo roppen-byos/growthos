@@ -134,6 +134,21 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(params, (date(2026, 10, 1), 20_001))
         cursor.fetchmany.assert_called_once_with(20_001)
 
+    def test_target_months_is_bounded_and_absent_table_is_empty(self):
+        connection, cursor = self.connection()
+        cursor.fetchone.return_value = (None,)
+        self.assertEqual(PostgresStore(connection).target_months(), [])
+        cursor.fetchmany.assert_not_called()
+        connection, cursor = self.connection()
+        cursor.fetchone.return_value = ("irf.pftu_targets",)
+        cursor.fetchmany.return_value = [(date(2026, 9, 1),), (date(2026, 10, 1),)]
+        self.assertEqual(PostgresStore(connection).target_months(), ["2026-09", "2026-10"])
+        query, params = cursor.execute.call_args.args
+        self.assertIn("SELECT DISTINCT month", query)
+        self.assertIn("LIMIT %s", query)
+        self.assertEqual(params, (13,))
+        cursor.fetchmany.assert_called_once_with(13)
+
     def test_target_permissions_missing_install_and_integrity_fail_closed(self):
         for replies, code in (([(None,)], "TARGETS_UNAVAILABLE"),
                               ([("irf.pftu_targets",), (False,)], "READ_ONLY_ROLE"),

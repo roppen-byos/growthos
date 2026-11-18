@@ -1,27 +1,24 @@
 # IRF answer format
 
-Use this reference when composing analytical answers. The skill owns tool use and
-interpretation; [report-playbook.md](report-playbook.md) owns required investigations
-and report-specific evidence. Formatting never replaces those checks.
+The skill governs tool use and interpretation; [report-playbook.md](report-playbook.md)
+governs required investigations and report-specific evidence. Formatting never replaces those checks.
 
 ## Answer first, then evidence
 
-1. **Bottom line:** answer the question in one or two sentences. State the selected
-   period and scope. Put any limitation that invalidates or materially qualifies
-   the headline beside it, not only at the end.
+1. **Bottom line:** answer in one or two sentences with the selected period and scope.
+   Put limitations that invalidate or materially qualify the headline beside it, not only at the end.
 2. **Evidence:** show a compact comparison or ranking table when it helps. Lead with
-   volumes and absolute movement (`absolute_delta`, or clearly labeled
+   volumes and absolute change (`absolute_delta`, or clearly labeled
    `known_subtotal_delta` for partial coverage), then growth, ratios and shares.
-3. **Explanation:** highlight up to three findings supported by the required
-   tier/city evidence. Explain relationships rather than repeating every cell.
-   Longer requested reports may need additional findings.
+3. **Explanation:** highlight up to three findings supported by required tier/city
+   evidence; longer requested reports may need more. Explain relationships rather than repeating cells.
 4. **Limitations and data note:** consolidate relevant unavailable observations,
    coverage/mapping warnings and month metadata/source-read times once per answer.
-   Identify which months/sources each timestamp describes; do not collapse distinct
-   reads into an invented common cutoff. Read times do not certify completeness.
+   Identify each timestamp's months/sources; do not invent a common cutoff for distinct
+   reads. Read times do not certify completeness.
 
-Use only the sections the question needs. A simple factual question can be a direct
-answer with a short data note; it does not require an empty table or full report.
+Use only the sections the question needs. A simple factual answer can have a short
+data note without an empty table or full report.
 
 ## Match the question
 
@@ -30,12 +27,12 @@ answer with a short data note; it does not require an empty table or full report
 | Two-month comparison | Bottom line, volume table, separate ratio/share table, explanation and limitations |
 | City ranking | Ranked table; state metric, delta/growth basis, direction, tier/filter and top-N scope |
 | Target lookup / attainment | Overall target/actual/shortfall, requested city evidence and scope; use [target-analysis.md](target-analysis.md) for facts versus selection, units and full-list delivery |
+| Target persistence | Main shortlist table first; then a separate “Also failing in <previous month> — shortfall widened >5pp” table with current/prior shortfall %, pp change and failing-since month |
 | Ratio investigation | Ratio movement, both operands, then tier/city explanation and coverage caveats |
 | Master report | Overall funnel, tiers/services, city drivers, limitations; follow the playbook |
 | Three-month view | Monthly observations and adjacent changes; clearly label endpoint period comparisons |
 
-Keep a narrow question narrow. This controls presentation length, not the evidence
-collection required by the playbook.
+Question size controls presentation length, not the playbook's required evidence collection.
 
 ## Tables
 
@@ -80,6 +77,6 @@ collection required by the playbook.
 - Use measured direction and magnitude rather than unsupported labels such as
   “critical,” “healthy” or “statistically significant.” No severity thresholds or
   causal conclusions are introduced by this format.
-- Keep structured CLI evidence as JSON internally. Present readable findings and
-  tables; reproduce raw JSON only when explicitly requested. Include requested
-  checksums/provenance details without inventing historical reproducibility.
+- Keep CLI evidence as JSON internally; present readable findings and tables.
+  Reproduce raw JSON only when explicitly requested. Include requested checksums/provenance
+  details without inventing historical reproducibility.

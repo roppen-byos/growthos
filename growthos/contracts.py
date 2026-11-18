@@ -64,6 +64,16 @@ def next_month(value: date) -> date:
     return date(value.year + (value.month == 12), value.month % 12 + 1, 1)
 
 
+def previous_month(value: str) -> str:
+    """The immediately preceding calendar month, never a skipped or substituted one."""
+    current = month(value)
+    if current.year == 1 and current.month == 1:
+        reject("MONTH", "Calendar month precedes the supported date range.")
+    if current.month > 1:
+        return f"{current.year:04d}-{current.month - 1:02d}"
+    return f"{current.year - 1:04d}-12"
+
+
 def month_range(start: str, end: str) -> list[str]:
     current, last = month(start), month(end)
     if current > last:
