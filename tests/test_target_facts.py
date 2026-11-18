@@ -72,7 +72,10 @@ class TargetFactsTests(unittest.TestCase):
     def test_zero_and_missing_targets_remain_visible_with_reasons_not_fallback(self):
         actuals = observations([("Zero", 0), ("Blank", 10), ("New City", 10)])
         targets = plan([("Zero", 0), ("Blank", None), ("Target Only", 100)], fallback=50)
-        rows = {r["city"]: r for r in target_facts(actuals, targets, "2026-10")["rows"]}
+        result = target_facts(actuals, targets, "2026-10")
+        rows = {r["city"]: r for r in result["rows"]}
+        self.assertEqual(result["fallback"]["city_count"], 1)
+        self.assertEqual((result["fallback"]["target"], result["fallback"]["actual"]), (50, 10))
         self.assertEqual(rows["Zero"]["attainment"], "at")
         self.assertEqual(rows["Zero"]["shortfall"], 0)
         self.assertIsNone(rows["Zero"]["shortfall_pct"])
@@ -81,8 +84,10 @@ class TargetFactsTests(unittest.TestCase):
         self.assertEqual(rows["Blank"]["target_source"], "city")
         self.assertEqual(rows["Blank"]["target_unavailable_reason"], "missing_target")
         self.assertEqual(rows["Target Only"]["actual_unavailable_reason"], "missing_city_observation")
-        self.assertEqual(rows["New City"]["target"], 50)
+        self.assertIsNone(rows["New City"]["target"])
         self.assertEqual(rows["New City"]["target_source"], "new_launch")
+        self.assertEqual(rows["New City"]["target_unavailable_reason"], "pooled_new_launch_target")
+        self.assertEqual(rows["New City"]["attainment"], "unavailable")
 
     def test_canonical_alias_filter_keeps_merged_target_and_single_actual(self):
         actuals = observations([("Trivandrum", 110)])

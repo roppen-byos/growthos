@@ -22,7 +22,7 @@ ordering, reconciliation and coverage selection belong to reviewed Python tools.
    | Order observations by absolute/relative gap, target or actual | `target-facts --sort city\|shortfall\|shortfall-pct\|target\|actual`, optionally `--descending` |
    | Select cities whose material gaps cover the overall shortfall | `target-analysis --mode top` |
    | List every city meeting the agreed material target-miss rule | `target-analysis --mode all` |
-   | List the separate New launch fallback cities instead of plan-matched ones | `target-analysis --queue fallback` |
+   | Inspect the pooled New launch fallback comparison and its city breakdown | `target-analysis --queue fallback` |
 
    General facts have **no implicit 5% filter** or coverage stop. Plain “cities
    missing targets” retains the agreed >5% policy via analysis/all; an explicit
@@ -34,11 +34,12 @@ ordering, reconciliation and coverage selection belong to reviewed Python tools.
    as cumulative coverage. Combine reviewed target and MoM/funnel tools when the
    question actually requests both, keeping the evidence and criteria separate.
    Target analysis returns the **plan-matched queue** (cities with an explicit
-   city target) by default. It always reports the count of **New launch fallback
-   cities** separately; those cities are never ranked inside the plan-matched
-   queue. When the returned `fallback.city_count` is nonzero, tell the user the
-   count and ask whether they want the fallback queue listed before running
-   `--queue fallback`.
+   city target) by default. It always reports the **pooled New launch fallback
+   comparison** for unplanned cities (their combined actual versus the single New
+   launch target); those cities are never ranked inside the plan-matched queue and
+   have no individual target. When `fallback.city_count` is nonzero, disclose the
+   pooled target/actual/shortfall and ask whether the user wants the actual-only
+   city breakdown before running `--queue fallback`.
 3. **Read evidence.** Select the matching command and parameters, for example:
    ```bash
    .venv/bin/python -m growthos target-facts --month YYYY-MM --city Delhi
@@ -65,9 +66,11 @@ ordering, reconciliation and coverage selection belong to reviewed Python tools.
    Include the tool's city, target, actual, shortfall and shortfall %. For selection,
    also include cumulative shortfall, coverage, uncovered amount and overshoot.
    Preserve exact ordering and disclose missing-value reasons/exclusions, the
-   plan-matched versus fallback queue, reconciliation differences and actual/target
-   provenance. Report `fallback.city_count` (and `fallback.eligible_city_count`)
-   beside the matched result and ask before listing the fallback queue.
+   plan-matched queue versus the separate pooled New launch fallback comparison,
+   reconciliation differences and actual/target provenance. Report the pooled
+   fallback target/actual/shortfall (`fallback.*`), `fallback.city_count`,
+   `fallback.skipped_null_city_count` and `fallback.qualifies` beside the matched
+   result, and ask before listing the actual-only fallback breakdown.
    When `overall.actual_coverage.skipped_null_ftu_city_count` is nonzero, disclose
    that count beside the headline: these cities were skipped in overall recorded
    FTU, not converted to zero. Use `install_or_registration_only_city_count` for
@@ -104,12 +107,12 @@ ordering, reconciliation and coverage selection belong to reviewed Python tools.
   policy. Use `overall.actual`, `overall.shortfall` and their explicit unavailable
   reason; do not relabel them N/A merely because some city FTU values are null.
   If all actual FTU values are null, actual/X remain unavailable, not zero. City targets,
-  deduplication and repeated fallbacks do not redefine that overall target.
+  deduplication and the pooled fallback do not redefine that overall target.
 - With `--tier`, the cohort is the cities in that tier in the selected stored
   month. Tier target and actual use only **plan-matched cohort cities** (those
   with an explicit city target), including approved merges and targets retained
-  for null-FTU cities. New launch fallback cities are outside that calculation and
-  are reported separately with their own count. The command selects against that
+  for null-FTU cities. Unplanned cities are outside that calculation and are
+  reported separately as the pooled New launch fallback. The command selects against that
   **tier's own plan-matched gap**. National Grand Total is not allocated or used
   for this calculation; summed tier targets need not match it. A tier whose cohort
   has no plan-matched city keeps target/actual/X unavailable rather than inventing
@@ -122,12 +125,16 @@ ordering, reconciliation and coverage selection belong to reviewed Python tools.
   when X=0. A missing overall target or no observed FTU keeps X unavailable; an empty top result in that
   case is not evidence that targets were achieved. All mode can still show known
   qualifying city observations.
-- Each actual city absent from the plan city list independently receives the
-  full **New launch** fallback. Those cities are never ranked inside the
-  plan-matched queue; `target-analysis` reports `fallback.city_count` and
-  `fallback.eligible_city_count`, and lists them only with `--queue fallback`.
-  The fallback is a repeated planning assumption, not proof of launch, an
-  allocation or one shared budget. Explicit missing/zero targets do not trigger it.
+- Each observed city absent from the plan joins one **New launch fallback pool**.
+  The monthly New launch target is compared against the pool's combined non-null
+  Platform FTU, giving one target/actual/shortfall/shortfall %; null pool cities
+  are skipped and disclosed, not zeroed. Unplanned cities have no individual
+  target or shortfall and are never ranked inside the plan-matched queue.
+  `target-analysis` always reports this pooled comparison (never added to the
+  national Grand Total or any tier gap); `--queue fallback` returns it with an
+  actual-only city breakdown. The fallback is a planning assumption, not proof of
+  launch, an allocation or a shared per-city budget. Explicit missing/zero plan
+  targets do not join the pool.
 - Attingal target + Trivandrum target is the canonical Trivandrum target; actuals
   already use that city. Ludhiana uses the source's T2 target row while its actual
   tier remains unchanged. Use returned evidence rather than redoing these joins.

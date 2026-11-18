@@ -56,22 +56,52 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
     for key in sorted(set(actuals) if tier else set(actuals) | set(explicit)):
         row = actuals.get(key)
         source = explicit.get(key, fallback)
-        actual, target = row["platform_ftu"] if row else None, source["target"]
+        actual = row["platform_ftu"] if row else None
+        pooled = source is fallback
+        target = None if pooled else source["target"]
         gap = target_attainment(target, actual)
         rows.append({
             "city_key": key, "city": row["city"] if row else source["city"], "target": target, "actual": actual,
             "shortfall": gap.shortfall, "shortfall_pct": gap.shortfall_pct,
-            "target_source": "new_launch" if source is fallback else "city",
+            "target_source": "new_launch" if pooled else "city",
             "source_targets": source["source_targets"],
             "attainment": gap.attainment, "qualifies_for_shortlist": gap.qualifies,
             "actual_unavailable_reason": "missing_city_observation" if row is None else "missing_platform_ftu" if actual is None else None,
-            "target_unavailable_reason": "missing_target" if target is None else None,
+            "target_unavailable_reason": "pooled_new_launch_target" if pooled else "missing_target" if target is None else None,
             "shortfall_pct_unavailable_reason": gap.reason,
         })
     def complete_sum(values):
         return None if any(v is None for v in values) else sum(values)
     city_sum = complete_sum([r["target"] for r in explicit.values()])
-    effective_targets = [explicit.get(key, fallback)["target"] for key in sorted(actuals)]
+    pool_rows = [actuals[key] for key in fallback_keys]
+    pool = observed_target_actuals(pool_rows)
+    fallback_gap = target_attainment(fallback["target"], pool.value)
+    if fallback["target"] is None:
+        fallback_reason = "missing_new_launch_target"
+    elif pool.value is None:
+        fallback_reason = "no_observed_platform_ftu"
+    else:
+        fallback_reason = fallback_gap.reason
+    fallback_summary = {
+        "target": fallback["target"], "actual": pool.value,
+        "shortfall": fallback_gap.shortfall, "shortfall_pct": fallback_gap.shortfall_pct,
+        "qualifies": fallback_gap.qualifies, "city_count": len(fallback_keys),
+        "observed_city_count": pool.observed_city_count,
+        "skipped_null_city_count": pool.skipped_null_ftu_city_count,
+        "unavailable_reason": fallback_reason,
+        "disclosure": (
+            "Unplanned cities share one New launch fallback target compared with their combined observed "
+            "Platform FTU; it is not an allocation, per-city target, shared budget or launch evidence."
+        ),
+    }
+    matched_actual_target_sum = complete_sum([explicit[key]["target"] for key in matched_keys])
+    if fallback_keys:
+        effective_target_sum = (
+            None if matched_actual_target_sum is None or fallback["target"] is None
+            else matched_actual_target_sum + fallback["target"]
+        )
+    else:
+        effective_target_sum = matched_actual_target_sum
     if tier:
         total = complete_sum([explicit[key]["target"] for key in matched_keys]) if matched_keys else None
         target_source = "tier_city_target_sum"
@@ -86,16 +116,16 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
     reconciliation = {
         "explicit_city_target_sum": city_sum, "city_targets_minus_grand_total": difference,
         "new_launch_target": fallback["target"],
-        "effective_actual_city_target_sum": complete_sum(effective_targets),
-        "overall_target_policy": "Grand Total is independent; repeated fallbacks never change it",
+        "effective_actual_city_target_sum": effective_target_sum,
+        "overall_target_policy": "Grand Total is independent; the pooled New launch fallback never changes it",
     }
     if tier:
         reconciliation = {
             "tier_city_target_sum": total, "explicit_city_target_sum": city_sum,
             "national_grand_total": overall["target"], "new_launch_target": fallback["target"],
             "plan_matched_city_target_sum": total,
-            "effective_actual_city_target_sum": complete_sum(effective_targets),
-            "overall_target_policy": "Tier target sums assigned targets of its plan-matched stored monthly city cohort; fallback cities are outside that calculation and the national Grand Total is not used or allocated",
+            "effective_actual_city_target_sum": effective_target_sum,
+            "overall_target_policy": "Tier target sums assigned targets of its plan-matched stored monthly city cohort; unplanned cities are outside that calculation and the national Grand Total is not used or allocated",
         }
     result = {
         **provenance(dataset, data=data), "month": period, "metric": "platform_ftu",
@@ -108,20 +138,22 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         "target_provenance": {"source_checksum": plan["source_checksum"],
                               "result_checksum": targets.result_checksum, "imported_at": plan["imported_at"]},
         "reconciliation": reconciliation,
+        "fallback": fallback_summary,
     }
     if tier:
         result["scope"] = {"tier": tier, "city_cohort": "selected_month_stored_tier",
                            "gap_basis": "plan_matched_tier_own_gap"}
-        result["warnings"].append("Tier target, actual and gap use only plan-matched cohort cities; New launch fallback cities are reported separately and are outside this tier calculation.")
+        result["warnings"].append("Tier target, actual and gap use only plan-matched cohort cities; unplanned cities are pooled into the separate New launch fallback comparison outside this tier calculation.")
         result["warnings"].append("Tier targets sum assigned city targets, not an allocation of Grand Total; tier totals need not reconcile to the national target.")
     if difference not in (None, 0):
         result["warnings"].append("Resolved city targets do not reconcile to Grand Total; neither has been adjusted.")
     if fallback_keys:
-        result["warnings"].append("Each unmatched actual city independently receives the full New launch target; these cities are excluded from the plan-matched queue and are not launch evidence or an allocation.")
+        result["warnings"].append("Unplanned actual cities share one New launch fallback target compared with their combined observed Platform FTU; they have no individual target and the fallback is not an allocation, shared budget or launch evidence.")
     skipped_warning = target_actual_warning(observed)
     if skipped_warning:
         result["warnings"].append(skipped_warning)
-    if any(r["actual"] is None or r["target"] is None for r in rows) or x_reason:
+    if any(r["actual"] is None for r in rows) or any(
+            r["target"] is None for r in rows if r["target_source"] == "city") or x_reason:
         result["warnings"].append(operand_warning)
     counts = {"actual_city_count": len(actuals), "target_city_count": len(explicit),
               "fallback_city_count": len(fallback_keys),
@@ -169,33 +201,28 @@ def target_cities(dataset: MonthlyData, targets: TargetMonth, period: str, *,
     matched_rows = [r for r in rows if r["target_source"] == "city"]
     fallback_rows = [r for r in rows if r["target_source"] == "new_launch"]
     matched_eligible, matched_excluded = _rank_target_rows(matched_rows)
-    fallback_eligible, fallback_excluded = _rank_target_rows(fallback_rows)
-    result["fallback"] = {
-        "target": result["reconciliation"]["new_launch_target"],
-        "city_count": len(fallback_rows), "eligible_city_count": len(fallback_eligible),
-        "recorded_actual": sum(r["actual"] for r in fallback_rows if r["actual"] is not None),
-        "excluded_city_counts": fallback_excluded,
-        "disclosure": "New launch fallback cities are not individually planned city targets; they are excluded from the plan-matched queue and reported separately.",
-    }
-    selected, cumulative = [], 0
     if queue == "fallback":
-        for row in fallback_eligible:
-            cumulative += row["shortfall"]
-            selected.append({**row, "cumulative_shortfall": cumulative})
+        items = [
+            {"city_key": r["city_key"], "city": r["city"], "actual": r["actual"],
+             "target_source": r["target_source"], "unavailable_reason": r["actual_unavailable_reason"]}
+            for r in fallback_rows
+        ]
+        items.sort(key=lambda r: (r["city"], r["city_key"]))
         coverage = {
-            "requested_shortfall": None, "selected_shortfall": cumulative,
+            "requested_shortfall": None, "selected_shortfall": None,
             "covered_amount": None, "uncovered_amount": None, "overshoot": None,
-            "eligible_shortfall": sum(r["shortfall"] for r in fallback_eligible), **counts,
-            "eligible_city_count": len(fallback_eligible), "selected_city_count": len(selected),
-            "excluded_city_counts": fallback_excluded,
-            "selection_status": "fallback_all_eligible",
+            "eligible_shortfall": result["fallback"]["shortfall"], **counts,
+            "selected_city_count": len(items), "excluded_city_counts": {},
+            "selection_status": "pooled_new_launch",
         }
     else:
+        selected, cumulative = [], 0
         for row in matched_eligible:
             if mode == "top" and (x is None or cumulative >= x):
                 break
             cumulative += row["shortfall"]
             selected.append({**row, "cumulative_shortfall": cumulative})
+        items = selected
         coverage = {
             "requested_shortfall": x, "selected_shortfall": cumulative,
             "covered_amount": None if x is None else min(x, cumulative),
@@ -206,14 +233,14 @@ def target_cities(dataset: MonthlyData, targets: TargetMonth, period: str, *,
             "excluded_city_counts": matched_excluded,
             "selection_status": "overall_shortfall_unavailable" if mode == "top" and x is None else "complete",
         }
-    page = selected[offset:offset + limit]
+    page = items[offset:offset + limit]
     result.update({
         "operation": "target-analysis", "mode": mode, "queue": queue,
         "eligibility": "shortfall > 5% of own positive target; missing operands excluded",
         "coverage": {**coverage, "queue": queue},
         "rows": page, "row_count": len(page), "offset": offset, "limit": limit,
-        "next_offset": offset + limit if offset + limit < len(selected) else None,
-        "omitted_row_count": len(selected) - len(page),
+        "next_offset": offset + limit if offset + limit < len(items) else None,
+        "omitted_row_count": len(items) - len(page),
     })
     result["warnings"].append("Shortfall coverage is arithmetic, not guaranteed recoverable FTU or a causal recommendation.")
     return result

@@ -257,7 +257,7 @@
       "components": {
         "grand_total": {
           "label": "Grand Total",
-          "definition": "Authoritative overall target for the month. It is independent of the summed city targets and is not reconciled to them; repeated New launch fallbacks never change it."
+          "definition": "Authoritative overall target for the month. It is independent of the summed city targets and is not reconciled to them; the pooled New launch fallback never changes it."
         },
         "city_target": {
           "label": "City target",
@@ -265,7 +265,7 @@
         },
         "new_launch_fallback": {
           "label": "New launch fallback",
-          "definition": "Repeated planning fallback used for each observed city absent from the plan's city list. It is not an allocation, a shared budget or launch evidence; explicit missing or nonpositive city targets do not trigger fallback."
+          "definition": "Single planning target for all observed cities absent from the plan, compared against their combined observed Platform FTU. It is not an allocation, per-city target, shared budget or launch evidence; explicit missing or nonpositive city targets do not join the pool."
         }
       }
     },
@@ -274,14 +274,14 @@
       "label": "Target Shortfall",
       "unit": "customers",
       "formula": "target - actual",
-      "definition": "Signed gap between a city's assigned target and its observed Platform FTU. A positive shortfall is a target miss and a negative shortfall is an overshoot; missing operands make it unavailable, never zero."
+      "definition": "Signed gap between an assigned target and its observed Platform FTU, for a matched city or the pooled New launch group. A positive shortfall is a target miss and a negative shortfall is an overshoot; missing operands make it unavailable, never zero."
     },
     "shortfall_percentage": {
       "id": "shortfall_percentage",
       "label": "Shortfall Percentage",
       "unit": "percent",
       "formula": "100 * (target - actual) / target",
-      "definition": "Shortfall relative to the city's own positive target, displayed as a percentage. It is unavailable for missing operands or a nonpositive target, while the valid absolute shortfall remains available."
+      "definition": "Shortfall relative to the assigned positive target (a city's plan target or the pooled New launch target), displayed as a percentage. It is unavailable for missing operands or a nonpositive target, while the valid absolute shortfall remains available."
     },
     "target_shortlist": {
       "id": "target_shortlist",
@@ -291,8 +291,8 @@
       "ordering": "Ranked by absolute Platform FTU shortfall descending, then city name.",
       "coverage_selection": "Top mode selects in that order until cumulative shortfall covers X = max(overall target - observed actual, 0); all mode returns every qualifying city even when X is zero. The threshold is never relaxed.",
       "match_queue": "Default plan-matched queue: cities with an explicit city target in the plan, selected and ranked on their own.",
-      "fallback_queue": "New launch fallback cities are excluded from the default queue and reported separately with their count, so fallback assignments never occupy the plan-matched ranking. Request the fallback queue to list them.",
-      "tier_scope": "For a tier, the target, actual and gap use only plan-matched cohort cities; fallback cities stay outside that calculation and national Grand Total reporting is unchanged."
+      "fallback_queue": "Unplanned cities are excluded from the default queue and returned only on explicit request as one pooled comparison of their non-null Platform FTU sum against the single New launch target, with an actual-only per-city breakdown. Every unplanned city has no individual target or shortfall.",
+      "tier_scope": "For a tier, the target, actual and gap use only plan-matched cohort cities; unplanned cities stay outside that tier calculation and are reported separately as the national New launch pool. National Grand Total reporting is unchanged."
     }
   },
   "glossary_distinctions": {

@@ -97,7 +97,7 @@ class TargetAnalysisTests(unittest.TestCase):
             self.assertEqual(top["rows"], [])
             self.assertEqual(len(target_cities(self.actuals, targets, "2026-10", mode="all")["rows"]), 3)
 
-    def test_fallback_is_repeated_and_kept_out_of_the_matched_queue(self):
+    def test_fallback_is_pooled_and_kept_out_of_the_matched_queue(self):
         actuals = observations([("New A", 10), ("New B", 30), ("Explicit Zero", 0)])
         targets = plan([("Explicit Zero", 0)], overall=200, fallback=100)
         result = target_cities(actuals, targets, "2026-10", mode="all")
@@ -108,13 +108,21 @@ class TargetAnalysisTests(unittest.TestCase):
         self.assertEqual(result["coverage"]["fallback_city_count"], 2)
         self.assertEqual(result["coverage"]["excluded_city_counts"]["nonpositive_target"], 1)
         summary = result["fallback"]
-        self.assertEqual((summary["target"], summary["city_count"], summary["eligible_city_count"], summary["recorded_actual"]), (100, 2, 2, 40))
-        self.assertIn("not individually planned city targets", summary["disclosure"])
+        self.assertEqual(
+            (summary["target"], summary["actual"], summary["shortfall"], summary["shortfall_pct"], summary["qualifies"]),
+            (100, 40, 60, 60, True),
+        )
+        self.assertEqual(
+            (summary["city_count"], summary["observed_city_count"], summary["skipped_null_city_count"]),
+            (2, 2, 0),
+        )
+        self.assertIn("combined observed", summary["disclosure"])
+        self.assertFalse(any("Some target or actual operands are unavailable" in w for w in result["warnings"]))
         fallback = target_cities(actuals, targets, "2026-10", queue="fallback")
         self.assertEqual([r["city"] for r in fallback["rows"]], ["New A", "New B"])
-        self.assertEqual([r["target"] for r in fallback["rows"]], [100, 100])
-        self.assertEqual([r["shortfall"] for r in fallback["rows"]], [90, 70])
-        self.assertEqual(fallback["coverage"]["selection_status"], "fallback_all_eligible")
+        self.assertEqual([r["actual"] for r in fallback["rows"]], [10, 30])
+        self.assertNotIn("target", fallback["rows"][0])
+        self.assertEqual(fallback["coverage"]["selection_status"], "pooled_new_launch")
         self.assertEqual(fallback["overall"]["target"], 200)
 
     def test_missing_actuals_targets_and_nonpositive_fallback(self):
@@ -132,9 +140,14 @@ class TargetAnalysisTests(unittest.TestCase):
         self.assertEqual(top["coverage"]["selection_status"], "complete")
         self.assertEqual(result["coverage"]["fallback_city_count"], 1)
         self.assertEqual(result["fallback"]["city_count"], 1)
-        self.assertEqual(result["fallback"]["eligible_city_count"], 0)
-        self.assertEqual(result["fallback"]["excluded_city_counts"]["nonpositive_target"], 1)
-        self.assertEqual(target_cities(actuals, targets, "2026-10", queue="fallback")["rows"], [])
+        self.assertEqual((result["fallback"]["target"], result["fallback"]["actual"]), (0, 1))
+        self.assertEqual(result["fallback"]["shortfall"], -1)
+        self.assertEqual(result["fallback"]["unavailable_reason"], "nonpositive_target")
+        self.assertFalse(result["fallback"]["qualifies"])
+        rows = target_cities(actuals, targets, "2026-10", queue="fallback")["rows"]
+        self.assertEqual([r["city"] for r in rows], ["New"])
+        self.assertEqual((rows[0]["actual"], rows[0]["target_source"]), (1, "new_launch"))
+        self.assertNotIn("target", rows[0])
         with self.assertRaises(GrowthOSError):
             target_cities(actuals, targets, "2026-10", queue="PRIVATE_marker")
 

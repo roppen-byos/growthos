@@ -43,7 +43,7 @@ Commands follow `.venv/bin/python -m growthos`. Use `<command> --help` for exact
 | Auto / Cab / Bike(Link) share drivers | `share-drivers --service auto\|cab\|link\|all [--top 15] [--tier T1]` |
 | Verify current data and stored checksums | `verify [--start YYYY-MM --end YYYY-MM]` |
 | Platform FTU target misses: top coverage shortlist or all qualifying cities | `target-analysis --month YYYY-MM --mode top\|all`; first read [target-analysis.md](target-analysis.md) |
-| New launch fallback cities (separate queue, ask first) | `target-analysis --month YYYY-MM --tier T1\|T2\|T3 --queue fallback`; first read [target-analysis.md](target-analysis.md) |
+| Pooled New launch fallback comparison (separate from matched, ask first) | `target-analysis --month YYYY-MM --tier T1\|T2\|T3 --queue fallback`; first read [target-analysis.md](target-analysis.md) |
 | Target/actual lookup, cities above/at/below target, factual attainment ordering | `target-facts --month YYYY-MM [--city CITY ...]`; first read [target-analysis.md](target-analysis.md) |
 | Tier-specific target facts or cities covering a tier's own gap | Add `--tier T1\|T2\|T3` to the selected target tool; first read [target-analysis.md](target-analysis.md) |
 

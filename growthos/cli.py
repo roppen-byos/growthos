@@ -83,7 +83,7 @@ def parser() -> argparse.ArgumentParser:
     target_cmd.add_argument("--limit", type=int, default=25, help="page size (1..100); not a selection cap")
     target_cmd.add_argument("--tier", help="stored monthly tier T1/T2/T3; cover that tier's own plan-matched city-target gap")
     target_cmd.add_argument("--queue", choices=("matched", "fallback"), default="matched",
-                            help="matched city targets (default) or the separate New launch fallback queue")
+                            help="matched city targets (default) or the pooled New launch fallback comparison")
 
     facts_cmd = commands.add_parser("target-facts", command_name="target-facts")
     facts_cmd.add_argument("--month", required=True, help="explicit ended month, YYYY-MM")

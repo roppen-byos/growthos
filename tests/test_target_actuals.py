@@ -46,7 +46,11 @@ class TargetActualTests(unittest.TestCase):
         self.assertEqual(result["coverage"]["uncovered_amount"], 20)
         self.assertEqual([r["city"] for r in result["rows"]], ["Known"])
         self.assertEqual(result["coverage"]["excluded_city_counts"]["missing_actual"], 0)
-        self.assertEqual(result["fallback"]["excluded_city_counts"]["missing_actual"], 1)
+        self.assertEqual(result["fallback"]["city_count"], 1)
+        self.assertEqual(result["fallback"]["observed_city_count"], 0)
+        self.assertEqual(result["fallback"]["skipped_null_city_count"], 1)
+        self.assertIsNone(result["fallback"]["actual"])
+        self.assertEqual(result["fallback"]["unavailable_reason"], "no_observed_platform_ftu")
         self.assertTrue(any("1 city had null FTU data and only installs or registrations recorded" in w for w in result["warnings"]))
         facts = target_facts(data, targets, "2026-10")
         missing = next(r for r in facts["rows"] if r["city"] == "Install Only")
@@ -71,11 +75,16 @@ class TargetActualTests(unittest.TestCase):
         self.assertEqual(result["coverage"]["selection_status"], "complete")
         # The sole plan-matched city is only ~4.3% below its own target, so the matched queue is empty.
         self.assertEqual(result["rows"], [])
-        # The 844 zero-FTU observed cities receive the repeated fallback and form a separate queue.
-        self.assertEqual(result["fallback"]["eligible_city_count"], 844)
+        # The 845 observed fallback cities pool to zero FTU against the single New launch target.
+        self.assertEqual(result["fallback"]["city_count"], 1321)
+        self.assertEqual(result["fallback"]["observed_city_count"], 844)
+        self.assertEqual(result["fallback"]["skipped_null_city_count"], 477)
+        self.assertEqual((result["fallback"]["target"], result["fallback"]["actual"]), (15000, 0))
+        self.assertEqual((result["fallback"]["shortfall"], result["fallback"]["qualifies"]), (15000, True))
         fallback = target_cities(data, targets, "2026-10", queue="fallback")
-        self.assertEqual(fallback["coverage"]["selected_city_count"], 844)
-        self.assertTrue(all(r["target"] == 15000 for r in fallback["rows"]))
+        self.assertEqual(fallback["coverage"]["selected_city_count"], 1321)
+        self.assertTrue(all(r["target_source"] == "new_launch" for r in fallback["rows"]))
+        self.assertTrue(all("target" not in r for r in fallback["rows"]))
         self.assertTrue(any("477 cities had null FTU data and only installs or registrations recorded" in w for w in result["warnings"]))
 
     def test_all_null_is_unavailable_but_observed_zero_is_valid(self):
