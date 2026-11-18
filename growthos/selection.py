@@ -1,12 +1,16 @@
-"""Period selection, city matching and paired observations for IRF operations."""
+"""Periods, canonical city matching, comparison cohorts and target fact selection."""
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from fractions import Fraction
+from zoneinfo import ZoneInfo
 
 from .classification import normalize_city_key
 from .contracts import TIERS, MonthlyData, month, next_month
 from .errors import reject
 
 
+BUSINESS_TIMEZONE = "Asia/Kolkata"
 CityPair = tuple[dict, dict | None, dict | None]
 
 
@@ -75,6 +79,52 @@ def validate_top(top: int, limit: int = 100) -> int:
     if type(top) is not int or not 1 <= top <= limit:
         reject("BOUNDS", f"Top limit must be an integer between 1 and {limit}.")
     return top
+
+
+def validate_target_request(value: str, mode: str, offset: int, limit: int, *, now=None) -> None:
+    selected = month(value)
+    zone = ZoneInfo(BUSINESS_TIMEZONE)
+    current = (now or datetime.now(timezone.utc)).astimezone(zone)
+    if selected >= current.date().replace(day=1):
+        reject("INCOMPLETE_MONTH", f"Target analysis requires an ended calendar month in {BUSINESS_TIMEZONE}.")
+    if mode not in ("top", "all"):
+        reject("ARGUMENTS", "Target mode must be top or all.")
+    if type(offset) is not int or not 0 <= offset <= 2**31 - 1:
+        reject("BOUNDS", "Target page offset must be a nonnegative bounded integer.")
+    if type(limit) is not int or not 1 <= limit <= 100:
+        reject("BOUNDS", "Target page limit must be between 1 and 100; selection is computed before paging.")
+
+
+TARGET_ATTAINMENTS = ("all", "above", "at", "below", "unavailable")
+TARGET_FACT_SORTS = ("city", "target", "actual", "shortfall", "shortfall-pct")
+
+
+def validate_target_facts_request(value: str, attainment: str, sort_by: str,
+                                  descending: bool, offset: int, limit: int) -> None:
+    validate_target_request(value, "all", offset, limit)
+    if attainment not in TARGET_ATTAINMENTS:
+        reject("ARGUMENTS", "Target attainment must be all, above, at, below or unavailable.")
+    if sort_by not in TARGET_FACT_SORTS or type(descending) is not bool:
+        reject("ARGUMENTS", "Use a reviewed target fact sort and boolean direction; run target-facts --help.")
+
+
+def select_target_facts(rows: list[dict], *, cities: list[str] | None,
+                        attainment: str, sort_by: str, descending: bool) -> list[dict]:
+    """Filter computed facts and order before paging; missing sort values stay last."""
+    wanted = match_cities(rows, cities) if cities else None
+    selected = [r for r in rows if (wanted is None or r["city_key"] in wanted)
+                and (attainment == "all" or r["attainment"] == attainment)]
+    selected.sort(key=lambda r: (r["city"], r["city_key"]))
+    if sort_by == "city":
+        return list(reversed(selected)) if descending else selected
+    field = sort_by.replace("-", "_")
+    known = [r for r in selected if r[field] is not None]
+    unavailable = [r for r in selected if r[field] is None]
+    if sort_by == "shortfall-pct":
+        known.sort(key=lambda r: Fraction(r["shortfall"], r["target"]), reverse=descending)
+    else:
+        known.sort(key=lambda r: r[field], reverse=descending)
+    return known + unavailable
 
 
 def match_cities(rows: list[dict], requested: list[str]) -> set[str]:

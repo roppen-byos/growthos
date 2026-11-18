@@ -10,12 +10,16 @@ from .analysis import (
     compare_overall,
     rank_cities,
     share_drivers,
+    target_cities,
+    target_facts,
 )
 from .contracts import month_range, validate_data
 from .errors import DiagnosticStage, MAX_OUTPUT_BYTES, SafeParser, diagnostic_stage, execute_cli, reject
 from .evidence import provenance
 from .metrics import ALL_METRICS
 from .postgres import connect_reader
+from .selection import normalize_tier, validate_target_request
+from .selection import TARGET_ATTAINMENTS, TARGET_FACT_SORTS, validate_target_facts_request
 
 
 def _add_period_args(command: argparse.ArgumentParser) -> None:
@@ -23,7 +27,9 @@ def _add_period_args(command: argparse.ArgumentParser) -> None:
     command.add_argument("--latest", help="YYYY-MM; requires --previous")
 
 
-COMMANDS = ("status", "compare", "rank", "funnel", "share-drivers", "verify")
+TARGET_COMMANDS = ("target-analysis", "target-facts")
+PERIOD_COMMANDS = ("compare", "rank", "funnel", "share-drivers")
+COMMANDS = ("status", *PERIOD_COMMANDS, "verify", *TARGET_COMMANDS)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -69,6 +75,25 @@ def parser() -> argparse.ArgumentParser:
     verify_cmd = commands.add_parser("verify", command_name="verify")
     verify_cmd.add_argument("--start", help="first stored month; requires --end; defaults to latest two")
     verify_cmd.add_argument("--end", help="last stored month; requires --start")
+
+    target_cmd = commands.add_parser("target-analysis", command_name="target-analysis")
+    target_cmd.add_argument("--month", required=True, help="explicit ended month, YYYY-MM")
+    target_cmd.add_argument("--mode", choices=("top", "all"), default="top", help="overall-shortfall coverage or every qualifying city")
+    target_cmd.add_argument("--offset", type=int, default=0, help="page offset after complete selection")
+    target_cmd.add_argument("--limit", type=int, default=25, help="page size (1..100); not a selection cap")
+    target_cmd.add_argument("--tier", help="stored monthly tier T1/T2/T3; cover that tier's own plan-matched city-target gap")
+    target_cmd.add_argument("--queue", choices=("matched", "fallback"), default="matched",
+                            help="matched city targets (default) or the separate New launch fallback queue")
+
+    facts_cmd = commands.add_parser("target-facts", command_name="target-facts")
+    facts_cmd.add_argument("--month", required=True, help="explicit ended month, YYYY-MM")
+    facts_cmd.add_argument("--city", action="append", default=[], help="repeatable canonical city/name filter; overall totals stay month-wide")
+    facts_cmd.add_argument("--attainment", choices=TARGET_ATTAINMENTS, default="all", help="exact actual-versus-target predicate; no implicit 5%% filter")
+    facts_cmd.add_argument("--sort", choices=TARGET_FACT_SORTS, default="city", help="sort field; unavailable values always last")
+    facts_cmd.add_argument("--descending", action="store_true", help="reverse primary sort; numeric ties keep city-name order")
+    facts_cmd.add_argument("--offset", type=int, default=0, help="page offset after filtering and sorting")
+    facts_cmd.add_argument("--limit", type=int, default=25, help="page size (1..100); follow next_offset for remaining facts")
+    facts_cmd.add_argument("--tier", help="stored monthly tier T1/T2/T3; totals use assigned targets for its city cohort")
 
     return root
 
@@ -126,6 +151,14 @@ def analyze(args, dataset):
 
 
 def run(args) -> dict:
+    if args.command in TARGET_COMMANDS:
+        with diagnostic_stage(DiagnosticStage.ARGUMENTS):
+            normalize_tier(args.tier)
+            if args.command == "target-analysis":
+                validate_target_request(args.month, args.mode, args.offset, args.limit)
+            else:
+                validate_target_facts_request(args.month, args.attainment, args.sort,
+                                               args.descending, args.offset, args.limit)
     with diagnostic_stage(DiagnosticStage.READER):
         with connect_reader() as store:
             if args.command == "status":
@@ -133,20 +166,31 @@ def run(args) -> dict:
                     return store.catalog(args.city_offset)
             with diagnostic_stage(DiagnosticStage.LOAD):
                 dataset = store.load(requested_months(args))
+                if args.command in TARGET_COMMANDS:
+                    targets = store.load_targets(args.month)
             with diagnostic_stage(DiagnosticStage.ANALYSIS):
+                if args.command == "target-analysis":
+                    return target_cities(dataset, targets, args.month, mode=args.mode,
+                                         offset=args.offset, limit=args.limit, tier=args.tier,
+                                         queue=args.queue)
+                if args.command == "target-facts":
+                    return target_facts(dataset, targets, args.month, cities=args.city or None,
+                                        attainment=args.attainment, sort_by=args.sort,
+                                        descending=args.descending, offset=args.offset, limit=args.limit, tier=args.tier)
                 return analyze(args, dataset)
 
 
 def requested_months(args):
-    if hasattr(args, "previous"):
+    if args.command in TARGET_COMMANDS:
+        return [args.month]
+    if args.command == "verify":
+        if (args.start is None) != (args.end is None):
+            reject("PERIOD", "Supply both --start and --end, or neither.")
+        return month_range(args.start, args.end) if args.start is not None else None
+    if args.command in PERIOD_COMMANDS:
         if (args.previous is None) != (args.latest is None):
             reject("PERIOD", "Supply both --previous and --latest, or neither.")
         return sorted(set((args.previous, args.latest))) if args.previous is not None else None
-    if hasattr(args, "start"):
-        if (args.start is None) != (args.end is None):
-            reject("PERIOD", "Supply both --start and --end, or neither.")
-        if args.start is not None:
-            return month_range(args.start, args.end)
     return None
 
 

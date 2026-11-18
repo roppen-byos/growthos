@@ -5,6 +5,7 @@ Analytical reports are delivered in chat.
 
 Approved scope: IRF only — Installs, Registrations, Platform FTU and Bike/Link,
 Auto, and Cab breakdowns — across all cities and completed calendar months.
+Platform FTU target facts and policy-based shortlists are also supported for a selected ended month.
 
 ## Task routing
 

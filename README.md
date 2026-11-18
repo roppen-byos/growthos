@@ -55,6 +55,11 @@ For guided recovery, say **"Setup failed"** and share only the sanitized CLI
 error, without credentials. A successful `status` checks the reporting connection;
 it does not certify source completeness or freshness.
 
+## Platform FTU targets
+
+Ask Codex about city targets, target misses or tier-specific shortlists.
+See the [target analysis guide](.agents/skills/growthos-irf-analysis/target-analysis.md) for rules and command examples.
+
 ## Tests
 
 ```bash

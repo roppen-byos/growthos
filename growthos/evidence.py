@@ -4,13 +4,29 @@ from datetime import datetime, timezone
 
 from .contracts import MAX_FACTS, MonthlyData
 from .errors import reject
-from .metrics import definitions
+from .metrics import TargetActualObservation, definitions
 
 CURRENT_DATA_WARNING = "Current monthly data may be replaced by a later fetch; no historical versions are retained."
 SOURCE_READ_WARNING = "Source-read timestamps describe query execution, not authoritative business-data completeness."
 INDEPENDENT_READ_WARNING = "Independent warehouse reads are not a transactional warehouse view; retained months are fetched independently."
 MISSING_TOTALS_WARNING = "Missing city observations or operands prevent complete totals; known_subtotal is not a total."
 TIER_RECLASSIFIED_WARNING = "City tier assignments changed across compared months; cohorts use each city's latest observed tier in the pair."
+TARGET_OPERANDS_WARNING = "Some target or actual operands are unavailable; cities with missing operands cannot qualify. Overall recorded FTU excludes null city FTU values."
+TARGET_FACT_OPERANDS_WARNING = "Some target or actual operands are unavailable; missing city observations remain visible in facts. Overall recorded FTU excludes null city FTU values."
+CITY_PAGE_SIZE = 25
+
+
+def target_actual_warning(actual: TargetActualObservation) -> str | None:
+    count = actual.skipped_null_ftu_city_count
+    if not count:
+        return None
+    cities = "1 city" if count == 1 else f"{count} cities"
+    ir_only = actual.install_or_registration_only_city_count
+    if count == ir_only:
+        return (f"{cities} had null FTU data and only installs or registrations recorded; "
+                "skipped from overall actual FTU, not treated as zero.")
+    return (f"{cities} had null FTU data and were skipped from overall actual FTU, not treated as zero; "
+            f"{ir_only} had only installs or registrations recorded and {count - ir_only} had other or no non-null metrics.")
 
 
 def provenance(dataset: MonthlyData, *, now: datetime | None = None, data: dict | None = None) -> dict:
@@ -43,7 +59,7 @@ def status_result(*, months: list[str], month_metadata: list[dict], fact_count: 
         "available_months": months, "month_metadata": month_metadata, "fact_count": fact_count,
         "metrics": definitions(), "tiers": tiers, "city_count": city_count, "cities": cities,
         "city_offset": city_offset,
-        "next_city_offset": city_offset + 25 if city_offset + 25 < city_count else None,
+        "next_city_offset": city_offset + CITY_PAGE_SIZE if city_offset + CITY_PAGE_SIZE < city_count else None,
         "omitted_city_count": max(0, city_count - len(cities)),
         "narrowing": "Read another city catalog page with status --city-offset OFFSET.",
         "warnings": [CURRENT_DATA_WARNING, SOURCE_READ_WARNING],
@@ -56,7 +72,7 @@ def catalog(dataset: MonthlyData, city_offset: int = 0) -> dict:
         reject("BOUNDS", "City catalog offset must be between zero and the fact limit.")
     data = dataset.data
     cities = {r["city_key"]: (r["city"], r["tier"]) for r in data["facts"]}
-    page = sorted(cities.items())[city_offset:city_offset + 25]
+    page = sorted(cities.items())[city_offset:city_offset + CITY_PAGE_SIZE]
     result = status_result(
         months=data["months"], month_metadata=data["month_metadata"], fact_count=len(data["facts"]),
         cities=[{"city_key": key, "city": city, "tier": tier} for key, (city, tier) in page],
@@ -66,5 +82,5 @@ def catalog(dataset: MonthlyData, city_offset: int = 0) -> dict:
     del result["fact_count"]
     return {
         **result, **provenance(dataset),
-        "supported_operations": ["status", "compare", "rank", "funnel", "share-drivers", "verify"],
+        "supported_operations": ["status", "compare", "rank", "funnel", "share-drivers", "verify", "target-analysis", "target-facts"],
     }

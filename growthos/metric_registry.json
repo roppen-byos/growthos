@@ -68,18 +68,12 @@
       "display_unit": "customers",
       "movement_unit": "customers",
       "service_membership": [
-        "Link",
-        "Bike Lite",
-        "Bike Pink",
-        "Bike Metro",
-        "Scooty",
-        "Scooty Lite",
-        "Bike Rated by Women"
+        "Link"
       ],
-      "definition": "Number of customers whose first-ever completed Rapido ride in the reporting period was on an approved Bike/Link service.",
+      "definition": "Number of customers whose first-ever completed Rapido ride in the reporting period was on the Bike/Link (`link`) service.",
       "caveats": [
         "Measures first-ever Rapido ride on Bike/Link (PFTU), not Bike/Link Service FTU (SVN).",
-        "Approved membership spans the seven Bike/Link services; 2026-09 and 2026-10 accepted a coarse Link category proxy under DEC-008, which does not prove seven-service measurement or certify other months."
+        "Bike/Link is measured as the single `link` service category under DEC-023, replacing the earlier seven-service membership; the physical source mapping remains uncertified."
       ]
     },
     "platform_auto_ftu": {
@@ -252,6 +246,53 @@
       ],
       "formula": "link_share - auto_share",
       "definition": "Difference between Bike/Link PFTU share and Auto PFTU share in the same period; period movement is 100 * (latest gap - previous gap) in percentage points."
+    }
+  },
+  "targets": {
+    "platform_ftu_target": {
+      "id": "platform_ftu_target",
+      "label": "Platform FTU Target",
+      "unit": "customers",
+      "definition": "Planned number of Platform FTU (first-ever completed rides) for a month, supplied by the city-level target plan. The plan carries a national Grand Total, per-city targets and a New launch fallback; these are planning inputs, not observed actuals or commitments.",
+      "components": {
+        "grand_total": {
+          "label": "Grand Total",
+          "definition": "Authoritative overall target for the month. It is independent of the summed city targets and is not reconciled to them; repeated New launch fallbacks never change it."
+        },
+        "city_target": {
+          "label": "City target",
+          "definition": "Planned target for one canonical city. Attingal and Trivandrum targets are combined under Trivandrum; Ludhiana keeps its T2-source target while its observed tier is unchanged."
+        },
+        "new_launch_fallback": {
+          "label": "New launch fallback",
+          "definition": "Repeated planning fallback used for each observed city absent from the plan's city list. It is not an allocation, a shared budget or launch evidence; explicit missing or nonpositive city targets do not trigger fallback."
+        }
+      }
+    },
+    "target_shortfall": {
+      "id": "target_shortfall",
+      "label": "Target Shortfall",
+      "unit": "customers",
+      "formula": "target - actual",
+      "definition": "Signed gap between a city's assigned target and its observed Platform FTU. A positive shortfall is a target miss and a negative shortfall is an overshoot; missing operands make it unavailable, never zero."
+    },
+    "shortfall_percentage": {
+      "id": "shortfall_percentage",
+      "label": "Shortfall Percentage",
+      "unit": "percent",
+      "formula": "100 * (target - actual) / target",
+      "definition": "Shortfall relative to the city's own positive target, displayed as a percentage. It is unavailable for missing operands or a nonpositive target, while the valid absolute shortfall remains available."
+    },
+    "target_shortlist": {
+      "id": "target_shortlist",
+      "label": "Material Target Miss Shortlist",
+      "definition": "Policy-based list of cities whose own target miss is material. Arithmetic and ordering come from reviewed tools; this is not a severity, forecast or causal claim.",
+      "eligibility": "Strictly more than 5% below the city's own positive target; exactly 5% and smaller misses are excluded, and missing operands or nonpositive targets cannot qualify.",
+      "ordering": "Ranked by absolute Platform FTU shortfall descending, then city name.",
+      "coverage_selection": "Top mode selects in that order until cumulative shortfall covers X = max(overall target - observed actual, 0); all mode returns every qualifying city even when X is zero. The threshold is never relaxed.",
+      "match_queue": "Default plan-matched queue: cities with an explicit city target in the plan, selected and ranked on their own.",
+      "fallback_queue": "New launch fallback cities are excluded from the default queue and reported separately with their count, so fallback assignments never occupy the plan-matched ranking. Request the fallback queue to list them.",
+      "tier_scope": "For a tier, the target, actual and gap use only plan-matched cohort cities; fallback cities stay outside that calculation and national Grand Total reporting is unchanged."
     }
   },
   "glossary_distinctions": {

@@ -9,7 +9,8 @@ import re
 
 from .contracts import FACT_FIELDS, MAX_FACTS, MAX_MONTHS, checksum, month, validate_data, validate_metadata
 from .errors import reject
-from .evidence import status_result, validate_city_offset
+from .evidence import CITY_PAGE_SIZE, status_result, validate_city_offset
+from .targets import TARGET_DB_FIELDS, targets_from_records
 
 DEFAULT_ENV_FILE: Path | None = Path(__file__).resolve().parents[1] / ".env"
 _UNSET = object()
@@ -79,6 +80,24 @@ def validate_reader_settings(settings: dict) -> None:
         reject("TLS", "Reporting connections require a single explicit network hostname and sslmode=verify-full.")
 
 
+def read_target_month(connection, value: str):
+    """Bounded read shared with the owner importer; caller owns connection permissions."""
+    selected = month(value)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"SELECT {','.join(TARGET_DB_FIELDS)} FROM irf.pftu_targets WHERE month=%s ORDER BY kind, city_key LIMIT %s",
+            (selected, MAX_FACTS + 1),
+        )
+        records = [dict(zip(TARGET_DB_FIELDS, row)) for row in cursor.fetchmany(MAX_FACTS + 1)]
+    for row in records:
+        row["month"] = row["month"].isoformat()[:7]
+        row["imported_at"] = row["imported_at"].isoformat()
+    result = targets_from_records(records)
+    if result.data["month"] != value:
+        reject("STORE_INTEGRITY", "Stored target month does not match the request.")
+    return result
+
+
 @contextmanager
 def connect_reader(*, env_file=_UNSET):
     resolved_env_file = DEFAULT_ENV_FILE if env_file is _UNSET else env_file
@@ -116,6 +135,20 @@ class PostgresStore:
         with self.connection.cursor() as cursor:
             cursor.execute("SELECT month FROM irf.month_metadata ORDER BY month")
             return [row[0].isoformat()[:7] for row in cursor.fetchall()]
+
+    def load_targets(self, value: str):
+        month(value)
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass('irf.pftu_targets')")
+            if cursor.fetchone() == (None,):
+                reject("TARGETS_UNAVAILABLE", "PFTU targets are not installed; existing monthly analysis remains available.")
+            cursor.execute("""SELECT has_table_privilege(current_user, 'irf.pftu_targets', 'SELECT')
+                AND NOT has_table_privilege(current_user, 'irf.pftu_targets',
+                    'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER,REFERENCES')
+                AND NOT has_schema_privilege(current_user, 'irf', 'CREATE')""")
+            if cursor.fetchone() != (True,):
+                reject("READ_ONLY_ROLE", "Target analysis requires SELECT-only access to PFTU targets.")
+        return read_target_month(self.connection, value)
 
     def load(self, months: list[str] | None = None):
         selected = self.available_months()[-2:] if months is None else months
@@ -158,10 +191,10 @@ class PostgresStore:
                     reject("STORE_INTEGRITY", "Stored month metadata does not match its key.")
             cursor.execute("SELECT count(DISTINCT city_key) FROM irf.facts")
             count = cursor.fetchone()[0]
-            cursor.execute("""SELECT city_key, city, tier FROM (
+            cursor.execute(f"""SELECT city_key, city, tier FROM (
                 SELECT DISTINCT ON (city_key) city_key, city, tier FROM irf.facts
                 ORDER BY city_key, month DESC
-            ) AS cities ORDER BY city_key LIMIT 25 OFFSET %s""", (city_offset,))
+            ) AS cities ORDER BY city_key LIMIT {CITY_PAGE_SIZE} OFFSET %s""", (city_offset,))
             cities = [dict(zip(("city_key", "city", "tier"), row)) for row in cursor.fetchall()]
             cursor.execute("SELECT DISTINCT tier FROM irf.facts ORDER BY tier")
             tiers = [row[0] for row in cursor.fetchall()]

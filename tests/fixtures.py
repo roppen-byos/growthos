@@ -65,16 +65,34 @@ class FixtureReaderStore:
         })
 
     def catalog(self, city_offset: int = 0) -> dict:
-        from growthos.evidence import status_result, validate_city_offset
+        from growthos.evidence import CITY_PAGE_SIZE, status_result, validate_city_offset
         validate_city_offset(city_offset)
         data = self._data.data
         cities = {r["city_key"]: {k: r[k] for k in ("city_key", "city", "tier")} for r in data["facts"]}
         return status_result(
             months=data["months"], month_metadata=data["month_metadata"],
-            fact_count=len(data["facts"]), cities=[cities[k] for k in sorted(cities)][city_offset:city_offset + 25],
+            fact_count=len(data["facts"]), cities=[cities[k] for k in sorted(cities)][city_offset:city_offset + CITY_PAGE_SIZE],
             city_count=len(cities), tiers=sorted({r["tier"] for r in data["facts"]}),
             city_offset=city_offset, nonproduction=data["nonproduction"],
         )
+
+    def load_targets(self, value: str):
+        return demo_targets(value)
+
+
+def demo_targets(value="2026-10"):
+    from growthos.targets import validate_targets
+    return validate_targets({
+        "month": value, "source_checksum": "a" * 64, "imported_at": "2026-11-02T00:01:00+00:00",
+        "rows": [
+            {"month": value, "kind": kind, "city_key": key, "city": city,
+             "target": count, "source_targets": [{"city": city, "target": count}]}
+            for kind, key, city, count in (
+                ("city", "harbor", "Harbor", 80), ("city", "vale", "Vale", 50),
+                ("new_launch", "", "New launch", 60), ("overall", "", "Grand Total", 150),
+            )
+        ],
+    })
 
 
 @contextmanager

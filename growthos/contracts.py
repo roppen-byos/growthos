@@ -95,8 +95,14 @@ def canonical_json(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode()
 
 
-def checksum(facts: list[dict]) -> str:
-    return hashlib.sha256(canonical_json(sorted(facts, key=lambda r: (r["month"], r["city_key"])))).hexdigest()
+def _digest(rows: list[dict]) -> str:
+    """SHA-256 of rows in the exact order given; callers must pre-sort canonically."""
+    return hashlib.sha256(canonical_json(rows)).hexdigest()
+
+
+def checksum(rows: list[dict], key=lambda r: (r["month"], r["city_key"])) -> str:
+    """Canonical SHA-256 of unordered rows, sorted by key first."""
+    return _digest(sorted(rows, key=key))
 
 
 def reporting_schema_sql() -> str:
@@ -206,4 +212,4 @@ def validate_data(raw: object, *, now: datetime | None = None) -> MonthlyData:
         "month_metadata": norm_metadata,
         "facts": norm_facts,
     }
-    return MonthlyData(canonical_json(normalized), hashlib.sha256(canonical_json(norm_facts)).hexdigest())
+    return MonthlyData(canonical_json(normalized), _digest(norm_facts))

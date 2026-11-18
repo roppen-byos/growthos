@@ -29,6 +29,7 @@ answer with a short data note; it does not require an empty table or full report
 | --- | --- |
 | Two-month comparison | Bottom line, volume table, separate ratio/share table, explanation and limitations |
 | City ranking | Ranked table; state metric, delta/growth basis, direction, tier/filter and top-N scope |
+| Target lookup / attainment | Overall target/actual/shortfall, requested city evidence and scope; use [target-analysis.md](target-analysis.md) for facts versus selection, units and full-list delivery |
 | Ratio investigation | Ratio movement, both operands, then tier/city explanation and coverage caveats |
 | Master report | Overall funnel, tiers/services, city drivers, limitations; follow the playbook |
 | Three-month view | Monthly observations and adjacent changes; clearly label endpoint period comparisons |

@@ -11,6 +11,75 @@ from .contracts import RATIOS, VOLUMES, text
 from .errors import reject
 
 ALL_METRICS = VOLUMES + tuple(RATIOS)
+
+
+@dataclass(frozen=True)
+class TargetAttainment:
+    shortfall: int | None
+    shortfall_pct: float | None
+    qualifies: bool
+    reason: str | None
+
+    @property
+    def attainment(self) -> str:
+        if self.shortfall is None:
+            return "unavailable"
+        if self.shortfall > 0:
+            return "below"
+        return "above" if self.shortfall < 0 else "at"
+
+
+def target_attainment(target: int | None, actual: int | None) -> TargetAttainment:
+    """Eligibility uses exact integer arithmetic; percentage is presentation only."""
+    if target is None or actual is None:
+        return TargetAttainment(None, None, False, "missing_target_or_actual")
+    shortfall = target - actual
+    if target <= 0:
+        return TargetAttainment(shortfall, None, False, "nonpositive_target")
+    return TargetAttainment(shortfall, 100 * shortfall / target,
+                            20 * shortfall > target, None)
+
+
+@dataclass(frozen=True)
+class TargetActualObservation:
+    """Approved target-only recorded total, not a strict all-city observation."""
+
+    value: int | None
+    observed_city_count: int
+    skipped_null_ftu_city_count: int
+    install_or_registration_only_city_count: int
+
+    @property
+    def reason(self) -> str | None:
+        return "no_observed_platform_ftu" if self.value is None else None
+
+    def to_dict(self) -> dict:
+        return {
+            "value": self.value, "known_subtotal": self.value if self.value is not None else 0,
+            "observed_city_count": self.observed_city_count,
+            "unavailable_city_count": self.skipped_null_ftu_city_count,
+            "skipped_null_ftu_city_count": self.skipped_null_ftu_city_count,
+            "install_or_registration_only_city_count": self.install_or_registration_only_city_count,
+            "other_null_ftu_city_count": self.skipped_null_ftu_city_count - self.install_or_registration_only_city_count,
+            "aggregation_policy": "sum_non_null_platform_ftu", "reason": self.reason,
+        }
+
+
+def observed_target_actuals(rows: list[dict]) -> TargetActualObservation:
+    """Skip null FTU for target overall totals only; never impute city observations."""
+    observed = [r for r in rows if r["platform_ftu"] is not None]
+    skipped = [r for r in rows if r["platform_ftu"] is None]
+    ir_only = sum(
+        all(r[m] is None for m in VOLUMES[2:])
+        and (r["installs"] is not None or r["registrations"] is not None)
+        for r in skipped
+    )
+    return TargetActualObservation(
+        sum(r["platform_ftu"] for r in observed) if observed else None,
+        len(observed), len(skipped), ir_only,
+    )
+
+
 _VOLUME_FIELDS = {
     "id", "label", "aliases", "kind", "unit", "subject_unit",
     "display_unit", "movement_unit", "definition", "caveats",
@@ -146,7 +215,7 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
         )
     except (OSError, ValueError):
         reject("SCHEMA", "Packaged metric registry is unreadable or invalid JSON.")
-    if not isinstance(payload, dict) or set(payload) != {"metrics", "movements", "glossary_distinctions", "rules"}:
+    if not isinstance(payload, dict) or set(payload) != {"metrics", "movements", "targets", "glossary_distinctions", "rules"}:
         reject("SCHEMA", "Metric registry top-level keys do not match the approved store shape.")
     metrics = payload["metrics"]
     if not isinstance(metrics, dict) or tuple(metrics) != ALL_METRICS:
@@ -217,6 +286,34 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
     if gap.get("operands") != ["link_share", "auto_share"] or gap.get("movement_unit") != "percentage_points":
         reject("SCHEMA", "Invalid link_vs_auto_share_gap definition in metric registry.")
 
+    targets = payload["targets"]
+    target_keys = {"platform_ftu_target", "target_shortfall", "shortfall_percentage", "target_shortlist"}
+    if not isinstance(targets, dict) or set(targets) != target_keys:
+        reject("SCHEMA", "Metric registry targets do not match the approved target definitions.")
+    for target_id, entry in targets.items():
+        if (
+            not isinstance(entry, dict)
+            or entry.get("id") != target_id
+            or not text(entry.get("label"))
+            or not _long_text(entry.get("definition"))
+        ):
+            reject("SCHEMA", "Invalid target definition in metric registry.")
+    components = targets["platform_ftu_target"].get("components")
+    if not isinstance(components, dict) or set(components) != {"grand_total", "city_target", "new_launch_fallback"}:
+        reject("SCHEMA", "Target plan components do not match the approved store shape.")
+    for component in components.values():
+        if (
+            not isinstance(component, dict) or set(component) != {"label", "definition"}
+            or not text(component.get("label")) or not _long_text(component.get("definition"))
+        ):
+            reject("SCHEMA", "Invalid target plan component in metric registry.")
+    if not text(targets["target_shortfall"].get("formula")) or not text(targets["shortfall_percentage"].get("formula")):
+        reject("SCHEMA", "Target shortfall definitions must declare a formula.")
+    shortlist = targets["target_shortlist"]
+    for field in ("eligibility", "ordering", "coverage_selection", "match_queue", "fallback_queue", "tier_scope"):
+        if not _long_text(shortlist.get(field)):
+            reject("SCHEMA", "Invalid target shortlist rule in metric registry.")
+
     glossary = payload["glossary_distinctions"]
     if not isinstance(glossary, dict) or set(glossary) != {"svn", "rr2net"}:
         reject("SCHEMA", "Metric registry glossary_distinctions must define svn and rr2net.")
@@ -263,6 +360,7 @@ def definitions() -> dict:
     return {
         **store["metrics"],
         **store["movements"],
+        "targets": store["targets"],
         "glossary_distinctions": store["glossary_distinctions"],
         "rules": store["rules"],
     }

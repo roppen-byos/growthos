@@ -1,6 +1,6 @@
 ---
 name: growthos-irf-analysis
-description: "Answer GrowthOS IRF questions: master reports, ratio investigations, quarterly monthly trends, city rankings/funnels, service-share drivers, and current-data verification."
+description: "Answer GrowthOS IRF questions: PFTU target/actual lookup and attainment rankings, coverage-based target shortlists, master reports, ratio investigations, monthly trends, city rankings/funnels, service-share drivers, and data verification."
 ---
 
 # GrowthOS IRF Analysis
@@ -13,6 +13,7 @@ Use this skill when the user asks for:
 - Installs, Registrations, Platform FTU, I2R or R2N comparisons across all cities, tiers or selected cities.
 - City growth/decline rankings, funnel investigations, or Bike/Link, Auto and Cab service-share drivers.
 - Available reporting months, metric definitions, city coverage, or verification of current stored IRF data.
+- Ended-month Platform FTU targets versus actuals, city attainment/rankings, coverage shortlists or all material target misses.
 
 ## Contract
 
@@ -24,7 +25,7 @@ Use this skill when the user asks for:
 
 1. **Check boundaries and interpreter.** Apply repository-root [AGENTS.md](../../../AGENTS.md) for scope and credentials; consult [README.md](../../../README.md) for local setup. Run commands from the repository root with `.venv/bin/python`.
 2. **Inspect current availability.** Run `.venv/bin/python -m growthos status`. Done when available months, the packaged business-first metric catalogue (`metrics`, derived from `growthos/metric_registry.json` — including PFTU vs glossary-only SVN and R2N vs RR2Net distinctions), warnings, month metadata, and source-read times are recorded.
-3. **Select periods and collect evidence.** Choose explicit months using the rules below, run the matching command(s) from the router, and reuse returned JSON across follow-ups. Before interpreting a master report, any highlighted I2R/R2N movement (even without a drilldown request), or a quarterly/three-month analysis, complete the matching branch in [report-playbook.md](report-playbook.md).
+3. **Select periods and collect evidence.** Choose explicit months using the rules below, run the matching command(s) from the router, and reuse returned JSON across follow-ups. For target questions, first load [target-analysis.md](target-analysis.md): choose general facts or policy-based selection from intent, with supported filters/order and complete pagination. Before interpreting a master report, any highlighted I2R/R2N movement (even without a drilldown request), or a quarterly/three-month analysis, complete the matching branch in [report-playbook.md](report-playbook.md).
 4. **Deliver the report in chat.** Done when requested evidence, the output-format requirements below, provenance/source-read caveats, and any applicable playbook completion checks are satisfied.
 
 ## Tools and command routing
@@ -41,6 +42,10 @@ Commands follow `.venv/bin/python -m growthos`. Use `<command> --help` for exact
 | Funnel drilldown for top or selected cities | `funnel --top 10 [--tier T2] [--city City ...] [--sort platform_ftu_delta]` |
 | Auto / Cab / Bike(Link) share drivers | `share-drivers --service auto\|cab\|link\|all [--top 15] [--tier T1]` |
 | Verify current data and stored checksums | `verify [--start YYYY-MM --end YYYY-MM]` |
+| Platform FTU target misses: top coverage shortlist or all qualifying cities | `target-analysis --month YYYY-MM --mode top\|all`; first read [target-analysis.md](target-analysis.md) |
+| New launch fallback cities (separate queue, ask first) | `target-analysis --month YYYY-MM --tier T1\|T2\|T3 --queue fallback`; first read [target-analysis.md](target-analysis.md) |
+| Target/actual lookup, cities above/at/below target, factual attainment ordering | `target-facts --month YYYY-MM [--city CITY ...]`; first read [target-analysis.md](target-analysis.md) |
+| Tier-specific target facts or cities covering a tier's own gap | Add `--tier T1\|T2\|T3` to the selected target tool; first read [target-analysis.md](target-analysis.md) |
 
 For projected funnel columns or units, read [funnel-columns.md](funnel-columns.md).
 
@@ -65,6 +70,7 @@ CLI failures return `{"error": {"code": "...", "message": "..."}}` with sanitize
 - `READ_ONLY_ROLE`, `TLS`, `STORE_INTEGRITY`, `SCHEMA`, `PROVENANCE`: stop the analysis immediately and surface the sanitized blocker; never attempt to bypass role, TLS, or checksum guards.
 - `OUTPUT_BOUND`, `BOUNDS`: narrow the month window or `--top`/`--tier`/`--city` filter and disclose the narrower scope.
 - Partial coverage or `null` metrics in valid JSON: continue with observed evidence, cite `known_subtotal*` and unavailable counts where provided, and render missing values as `N/A`.
+- `TARGETS_UNAVAILABLE` or `TARGETS`: report the target-data limitation and requested month; existing MoM analysis remains separate. Table installation/correction is an administrator task, not an analyst action.
 
 ## Anti-patterns
 

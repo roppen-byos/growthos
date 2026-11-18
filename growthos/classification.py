@@ -4,16 +4,28 @@ from __future__ import annotations
 
 import re
 
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.strip().casefold()).strip("_")
+
+
+# Canonical display name -> merged-in source display names; the single source of
+# truth from which both the key merge map and the lineage map are derived.
+_MERGE_GROUPS: dict[str, tuple[str, ...]] = {
+    "Delhi": ("Faridabad",),
+    "Trivandrum": ("Attingal",),
+    "Vijayawada": ("Guntur",),
+}
+
 EXPLICIT_MERGES: dict[str, str] = {
-    "attingal": "trivandrum",
-    "faridabad": "delhi",
-    "guntur": "vijayawada",
+    _slug(source): _slug(canonical)
+    for canonical, sources in _MERGE_GROUPS.items()
+    for source in sources
 }
 
 MERGED_SOURCE_CITIES: dict[str, tuple[str, ...]] = {
-    "delhi": ("Delhi", "Faridabad"),
-    "trivandrum": ("Attingal", "Trivandrum"),
-    "vijayawada": ("Guntur", "Vijayawada"),
+    _slug(canonical): tuple(sorted((canonical, *sources)))
+    for canonical, sources in _MERGE_GROUPS.items()
 }
 
 _TIER_CITIES: dict[str, tuple[str, ...]] = {
@@ -100,10 +112,6 @@ _TIER_CITIES: dict[str, tuple[str, ...]] = {
         'Vizianagaram', 'Warangal', 'Yamuna Nagar',
     ),
 }
-
-
-def _slug(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", value.strip().casefold()).strip("_")
 
 
 CANONICAL_CITIES: dict[str, tuple[str, str]] = {
