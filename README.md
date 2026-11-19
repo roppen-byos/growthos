@@ -60,6 +60,21 @@ it does not certify source completeness or freshness.
 Ask Codex about city targets, target misses, tier-specific shortlists, or how much of a same-month Platform FTU gap registration volume accounts for (`investigate`).
 See the [target analysis guide](.agents/skills/growthos-irf-analysis/target-analysis.md) for rules and command examples.
 
+## Metric source queries
+
+Inspect the packaged warehouse SQL behind each volume metric without a database
+connection:
+
+```bash
+.venv/bin/python -m growthos warehouse-queries
+.venv/bin/python -m growthos warehouse-queries --metric installs
+.venv/bin/python -m growthos warehouse-queries --id ftu-monthly
+```
+
+The metric registry references these queries under `warehouse_queries`; full SQL is
+returned only by this command. The packaged copy is guarded against drift by the
+operator suite in `gwos-data`.
+
 ## Tests
 
 ```bash

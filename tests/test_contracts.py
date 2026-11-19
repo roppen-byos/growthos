@@ -116,7 +116,7 @@ class ContractTests(unittest.TestCase):
         import json
 
         store = metric_registry()
-        self.assertEqual(set(store), {"metrics", "movements", "targets", "glossary_distinctions", "rules"})
+        self.assertEqual(set(store), {"metrics", "movements", "targets", "warehouse_queries", "glossary_distinctions", "rules"})
         self.assertNotIn("version", store)
         self.assertNotIn("schema_version", store)
         self.assertEqual(tuple(store["metrics"]), ALL_METRICS)

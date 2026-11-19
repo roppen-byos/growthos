@@ -305,6 +305,29 @@
       "limits": "A city that missed both months but improved is not listed. Absence is not evidence that a city met earlier targets or that the prior month was complete."
     }
   },
+  "warehouse_queries": {
+    "resource": "sql/warehouse_queries.sql",
+    "queries": {
+      "installs-monthly": {
+        "metrics": [
+          "installs"
+        ]
+      },
+      "registrations-monthly": {
+        "metrics": [
+          "registrations"
+        ]
+      },
+      "ftu-monthly": {
+        "metrics": [
+          "platform_ftu",
+          "platform_link_ftu",
+          "platform_auto_ftu",
+          "platform_cab_ftu"
+        ]
+      }
+    }
+  },
   "glossary_distinctions": {
     "svn": {
       "term": "Service FTU (SVN)",

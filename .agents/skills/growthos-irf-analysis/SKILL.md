@@ -13,6 +13,7 @@ Use this skill when the user asks for:
 - Installs, Registrations, Platform FTU, I2R or R2N comparisons across all cities, tiers or selected cities.
 - City growth/decline rankings, funnel investigations, or Bike/Link, Auto and Cab service-share drivers.
 - Available reporting months, metric definitions, city coverage, or verification of current stored IRF data.
+- The warehouse source SQL behind a metric (`warehouse-queries`), with no database connection.
 - Ended-month Platform FTU targets versus actuals, city attainment/rankings, coverage shortlists or all material target misses.
 
 ## Contract
@@ -35,6 +36,7 @@ Commands follow `.venv/bin/python -m growthos`. Use `<command> --help` for exact
 | User asks | Command |
 | --- | --- |
 | Stored months, metrics, cities | `status [--city-offset N]` |
+| Warehouse SQL behind a metric | `warehouse-queries [--metric METRIC] [--id QUERY-ID]`; read [metric-provenance.md](metric-provenance.md) |
 | Overall MoM / period comparison (`i2r`, `r2n`, shares) | `compare [--previous YYYY-MM --latest YYYY-MM]` |
 | Tier breakdown (`T1`, `T2`, `T3`) | `compare --group-by tier [--tier T1\|T2\|T3]` |
 | Key / selected city MoM comparison | `compare --group-by city [--city City ...] [--top 25]` |

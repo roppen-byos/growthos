@@ -101,5 +101,5 @@ def catalog(dataset: MonthlyData, city_offset: int = 0) -> dict:
     del result["fact_count"]
     return {
         **result, **provenance(dataset),
-        "supported_operations": ["status", "compare", "rank", "funnel", "share-drivers", "verify", "target-analysis", "target-facts", "investigate"],
+        "supported_operations": ["status", "compare", "rank", "funnel", "share-drivers", "warehouse-queries", "verify", "target-analysis", "target-facts", "investigate"],
     }

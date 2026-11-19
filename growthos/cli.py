@@ -19,6 +19,7 @@ from .evidence import provenance
 from .investigation import investigate
 from .metrics import ALL_METRICS
 from .postgres import connect_reader
+from .queries import warehouse_output, warehouse_query_ids
 from .selection import INVESTIGATION_MAX_BLOCKS, investigation_block_count, parse_investigation_group
 from .selection import normalize_tier, validate_investigation_request, validate_target_request
 from .selection import TARGET_ATTAINMENTS, TARGET_FACT_SORTS, validate_target_facts_request
@@ -31,7 +32,7 @@ def _add_period_args(command: argparse.ArgumentParser) -> None:
 
 TARGET_COMMANDS = ("target-analysis", "target-facts")
 PERIOD_COMMANDS = ("compare", "rank", "funnel", "share-drivers")
-COMMANDS = ("status", *PERIOD_COMMANDS, "verify", *TARGET_COMMANDS, "investigate")
+COMMANDS = ("status", *PERIOD_COMMANDS, "warehouse-queries", "verify", *TARGET_COMMANDS, "investigate")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -73,6 +74,10 @@ def parser() -> argparse.ArgumentParser:
     share_cmd.add_argument("--service", choices=("all", "link", "bike", "auto", "cab"), default="all", help="service share to decompose")
     share_cmd.add_argument("--top", type=int, default=15, help="top N growth and decline cities (1..100)")
     share_cmd.add_argument("--tier", help="optional tier filter (T1, T2, T3)")
+
+    queries_cmd = commands.add_parser("warehouse-queries", command_name="warehouse-queries")
+    queries_cmd.add_argument("--metric", choices=ALL_METRICS, help="only queries that produce this metric")
+    queries_cmd.add_argument("--id", dest="query_id", choices=warehouse_query_ids(), help="one packaged warehouse query")
 
     verify_cmd = commands.add_parser("verify", command_name="verify")
     verify_cmd.add_argument("--start", help="first stored month; requires --end; defaults to latest two")
@@ -172,6 +177,8 @@ def load_target_context(store, period: str):
 
 
 def run(args) -> dict:
+    if args.command == "warehouse-queries":
+        return warehouse_output(args.metric, args.query_id)
     investigation = None
     if args.command == "investigate":
         with diagnostic_stage(DiagnosticStage.ARGUMENTS):

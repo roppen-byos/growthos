@@ -9,6 +9,7 @@ from typing import Mapping
 
 from .contracts import RATIOS, VOLUMES, text
 from .errors import reject
+from .queries import RESOURCE as WAREHOUSE_RESOURCE, warehouse_queries
 
 ALL_METRICS = VOLUMES + tuple(RATIOS)
 
@@ -215,7 +216,7 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
         )
     except (OSError, ValueError):
         reject("SCHEMA", "Packaged metric registry is unreadable or invalid JSON.")
-    if not isinstance(payload, dict) or set(payload) != {"metrics", "movements", "targets", "glossary_distinctions", "rules"}:
+    if not isinstance(payload, dict) or set(payload) != {"metrics", "movements", "targets", "warehouse_queries", "glossary_distinctions", "rules"}:
         reject("SCHEMA", "Metric registry top-level keys do not match the approved store shape.")
     metrics = payload["metrics"]
     if not isinstance(metrics, dict) or tuple(metrics) != ALL_METRICS:
@@ -319,6 +320,31 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
         if not _long_text(persistence.get(field)):
             reject("SCHEMA", "Invalid target persistence rule in metric registry.")
 
+    warehouse_store = payload["warehouse_queries"]
+    if (
+        not isinstance(warehouse_store, dict)
+        or set(warehouse_store) != {"resource", "queries"}
+        or warehouse_store.get("resource") != WAREHOUSE_RESOURCE
+        or not isinstance(warehouse_store.get("queries"), dict)
+    ):
+        reject("SCHEMA", "Metric registry warehouse query source does not match the packaged query store.")
+    declared = warehouse_store["queries"]
+    packaged = warehouse_queries()
+    if tuple(declared) != tuple(packaged):
+        reject("SCHEMA", "Metric registry warehouse queries disagree with the packaged query file.")
+    covered: list[str] = []
+    for query_id, entry in declared.items():
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != {"metrics"}
+            or not _string_list(entry.get("metrics"), max_len=80)
+            or tuple(entry["metrics"]) != packaged[query_id]["metrics"]
+        ):
+            reject("SCHEMA", "Invalid warehouse query metric mapping in metric registry.")
+        covered.extend(entry["metrics"])
+    if len(covered) != len(VOLUMES) or set(covered) != set(VOLUMES):
+        reject("SCHEMA", "Warehouse queries must cover each volume metric exactly once and no ratio metric.")
+
     glossary = payload["glossary_distinctions"]
     if not isinstance(glossary, dict) or set(glossary) != {"svn", "rr2net"}:
         reject("SCHEMA", "Metric registry glossary_distinctions must define svn and rr2net.")
@@ -366,6 +392,7 @@ def definitions() -> dict:
         **store["metrics"],
         **store["movements"],
         "targets": store["targets"],
+        "warehouse_queries": store["warehouse_queries"],
         "glossary_distinctions": store["glossary_distinctions"],
         "rules": store["rules"],
     }

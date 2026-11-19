@@ -107,7 +107,7 @@ class CliTests(unittest.TestCase):
 
     def test_supported_operations_are_exposed(self):
         self.assertEqual(catalog(demo_data())["supported_operations"], [
-            "status", "compare", "rank", "funnel", "share-drivers", "verify",
+            "status", "compare", "rank", "funnel", "share-drivers", "warehouse-queries", "verify",
             "target-analysis", "target-facts", "investigate",
         ])
 
