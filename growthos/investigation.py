@@ -22,9 +22,10 @@ MEMBER_PAGE_SIZE = 25
 
 METHOD = {
     "comparison": "registration_effect / ftu_target_gap",
+    "ftu_target_gap": "platform_ftu_actual - platform_ftu_target",
     "target_ratio": "platform_ftu_target / registrations_target",
     "expected_ftu": "registrations_actual * target_ratio",
-    "registration_effect": "platform_ftu_target - expected_ftu",
+    "registration_effect": "expected_ftu - platform_ftu_target",
     "priority_threshold_pct": 70,
     "threshold_comparison": "strictly_greater_than",
     "arithmetic": "exact rational; float fields are presentation only",
@@ -36,8 +37,8 @@ METHOD = {
 
 THRESHOLDS = {
     "registration_priority_above_pct": 70,
-    "ftu_miss": "ftu_target_gap > 0",
-    "shortlist_rule": "unchanged; shortfall > 5 percent of own positive target",
+    "ftu_miss": "ftu_target_gap < 0",
+    "shortlist_rule": "unchanged; variance < -5 percent of own positive target",
     "registration_miss_gate": "none",
 }
 
@@ -48,13 +49,13 @@ def _fraction(value) -> Fraction | None:
 
 def _account(ftu_target, ftu_actual, reg_target, reg_actual) -> dict:
     """Shared operands and derived effect fields; every unavailability stays null."""
-    ftu_gap = None if ftu_target is None or ftu_actual is None else ftu_target - ftu_actual
-    reg_gap = None if reg_target is None or reg_actual is None else reg_target - reg_actual
+    ftu_gap = None if ftu_target is None or ftu_actual is None else ftu_actual - ftu_target
+    reg_gap = None if reg_target is None or reg_actual is None else reg_actual - reg_target
     ratio = (Fraction(ftu_target, reg_target)
              if ftu_target is not None and reg_target is not None and reg_target > 0 else None)
     expected = None if ratio is None or reg_actual is None else ratio * reg_actual
-    effect = None if expected is None or ftu_target is None else _fraction(ftu_target) - expected
-    contribution = None if effect is None or ftu_gap is None or ftu_gap <= 0 else effect / _fraction(ftu_gap)
+    effect = None if expected is None or ftu_target is None else expected - _fraction(ftu_target)
+    contribution = None if effect is None or ftu_gap is None or ftu_gap >= 0 else effect / _fraction(ftu_gap)
     unexplained = None if effect is None or ftu_gap is None else _fraction(ftu_gap) - effect
     return {
         "ftu_target": ftu_target,
@@ -109,12 +110,12 @@ def _verdict(state: dict) -> tuple[str, str | None, list[str]]:
         return "undetermined", "nonpositive_ftu_target", []
     if state["reg_target"] <= 0:
         return "undetermined", "nonpositive_registration_target", []
-    if state["ftu_gap"] <= 0:
+    if state["ftu_gap"] >= 0:
         return "not_applicable", "ftu_target_met", []
     if state["_contribution"] is None:
         return "undetermined", "contribution_unavailable", []
     if state["_contribution"] <= 0:
-        return "no_registration_shortfall", "registration_effect_nonpositive", []
+        return "no_registration_shortfall", "registration_effect_nonnegative", []
     flags = ["over_explained"] if state["_contribution"] > 1 else []
     if state["_contribution"] > PRIORITY:
         return "registration_priority", None, flags
@@ -218,12 +219,12 @@ def _aggregate(members: list[tuple[str, str, dict]]) -> tuple[dict, list[str]]:
                   else sum(effects, Fraction(0)))
     gap_sum = (None if not gaps or any(value is None for value in gaps)
                else sum(gaps, 0))
-    contribution = (None if effect_sum is None or gap_sum is None or gap_sum <= 0
+    contribution = (None if effect_sum is None or gap_sum is None or gap_sum >= 0
                     else effect_sum / Fraction(gap_sum))
     ftu_target, ftu_actual = total("ftu_target"), total("ftu_actual")
     reg_target, reg_actual = total("reg_target"), total("reg_actual")
     ftu_gap = total("ftu_gap")
-    reg_gap = None if reg_target is None or reg_actual is None else reg_target - reg_actual
+    reg_gap = None if reg_target is None or reg_actual is None else reg_actual - reg_target
     operands = {
         "ftu_target": ftu_target, "ftu_actual": ftu_actual, "ftu_gap": ftu_gap,
         "ftu_gap_pct": (None if ftu_gap is None or not ftu_target or ftu_target <= 0
@@ -234,7 +235,7 @@ def _aggregate(members: list[tuple[str, str, dict]]) -> tuple[dict, list[str]]:
         "target_ratio": (None if ftu_target is None or reg_target is None or reg_target <= 0
                          else float(Fraction(ftu_target, reg_target))),
         "expected_ftu": (None if effect_sum is None or ftu_target is None
-                         else float(ftu_target - effect_sum)),
+                         else float(ftu_target + effect_sum)),
         "registration_effect": None if effect_sum is None else float(effect_sum),
         "unexplained_gap": (None if effect_sum is None or ftu_gap is None
                             else float(ftu_gap - effect_sum)),
@@ -295,7 +296,7 @@ def _tier_block(context: dict, tier: str) -> tuple[dict, int]:
     operands, blocking = _aggregate(members)
     state = {**_state(context), "no_members": not matched, "incomplete": bool(blocking)}
     ranked = sorted(members, key=lambda item: (
-        item[2]["ftu_gap"] is None, -(item[2]["ftu_gap"] or 0), item[1], item[0]))
+        item[2]["ftu_gap"] is None, item[2]["ftu_gap"] or 0, item[1], item[0]))
     blocks = [
         _block(_scope("city", name, context["month"], [key]), member, _state(context))
         for key, name, member in ranked

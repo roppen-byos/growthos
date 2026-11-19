@@ -269,38 +269,38 @@
         }
       }
     },
-    "target_shortfall": {
-      "id": "target_shortfall",
-      "label": "Target Shortfall",
+    "target_variance": {
+      "id": "target_variance",
+      "label": "Target Variance",
       "unit": "customers",
-      "formula": "target - actual",
-      "definition": "Signed gap between an assigned target and its observed Platform FTU, for a matched city or the pooled New launch group. A positive shortfall is a target miss and a negative shortfall is an overshoot; missing operands make it unavailable, never zero."
+      "formula": "actual - target",
+      "definition": "Signed difference between observed Platform FTU and an assigned target, for a matched city or the pooled New launch group. A negative variance is a target miss (shortfall) and a positive variance is above target (overshoot); missing operands make it unavailable, never zero."
     },
-    "shortfall_percentage": {
-      "id": "shortfall_percentage",
-      "label": "Shortfall Percentage",
+    "variance_percentage": {
+      "id": "variance_percentage",
+      "label": "Variance Percentage",
       "unit": "percent",
-      "formula": "100 * (target - actual) / target",
-      "definition": "Shortfall relative to the assigned positive target (a city's plan target or the pooled New launch target), displayed as a percentage. It is unavailable for missing operands or a nonpositive target, while the valid absolute shortfall remains available."
+      "formula": "100 * (actual - target) / target",
+      "definition": "Signed variance relative to the assigned positive target (a city's target or the pooled New launch target), displayed as a percentage. Negative means below target and positive means above target. It is unavailable for missing operands or a nonpositive target, while the valid absolute variance remains available."
     },
     "target_shortlist": {
       "id": "target_shortlist",
       "label": "Material Target Miss Shortlist",
       "definition": "Policy-based list of cities whose own target miss is material. Arithmetic and ordering come from reviewed tools; this is not a severity, forecast or causal claim.",
-      "eligibility": "Strictly more than 5% below the city's own positive target; exactly 5% and smaller misses are excluded, and missing operands or nonpositive targets cannot qualify.",
-      "ordering": "Ranked by absolute Platform FTU shortfall descending, then city name.",
-      "coverage_selection": "Top mode selects in that order until cumulative shortfall covers X = max(overall target - observed actual, 0); all mode returns every qualifying city even when X is zero. The threshold is never relaxed.",
+      "eligibility": "Strictly more than 5% below the city's own positive target (variance < -5%); exactly -5% and smaller misses are excluded, and missing operands or nonpositive targets cannot qualify.",
+      "ordering": "Ranked by largest negative Platform FTU variance (largest shortfall) first, then city name.",
+      "coverage_selection": "Top mode selects in that order until cumulative shortfall covered reaches X = max(overall target - observed actual, 0); all mode returns every qualifying city even when X is zero. The threshold is never relaxed.",
       "match_queue": "Default plan-matched queue: cities with an explicit city target in the plan, selected and ranked on their own.",
-      "fallback_queue": "Unplanned cities are excluded from the default queue and returned only on explicit request as one pooled comparison of their non-null Platform FTU sum against the single New launch target, with an actual-only per-city breakdown. Every unplanned city has no individual target or shortfall.",
+      "fallback_queue": "Unplanned cities are excluded from the default queue and returned only on explicit request as one pooled comparison of their non-null Platform FTU sum against the single New launch target, with an actual-only per-city breakdown. Every unplanned city has no individual target or variance.",
       "tier_scope": "For a tier, the target, actual and gap use only plan-matched cohort cities; unplanned cities stay outside that tier calculation and are reported separately as the national New launch pool. National Grand Total reporting is unchanged."
     },
     "target_persistence": {
       "id": "target_persistence",
       "label": "Target Miss Widening Against Prior Month",
-      "definition": "Annotation of a currently returned material target miss whose shortfall percentage also widened against the immediately previous stored month. Each row is labelled persistent or new_miss.",
-      "eligibility": "A currently returned plan-matched city must be strictly more than 5% below its own positive target in the selected month, and the immediately previous calendar month must have an explicit positive city target and a non-null actual. The same 5% rule labels the row; a prior-month material miss is not required.",
-      "comparison": "Listed only when current shortfall percentage minus previous shortfall percentage is strictly greater than 5 percentage points, evaluated with exact integer arithmetic before display rounding.",
-      "statuses": "persistent when the prior shortfall was also strictly more than 5% of its positive target, otherwise new_miss. failing_since is the previous month for persistent rows and the selected month for new_miss rows.",
+      "definition": "Annotation of a currently returned material target miss whose variance percentage also worsened against the immediately previous stored month. Each row is labelled persistent or new_miss.",
+      "eligibility": "A currently returned plan-matched city must be strictly more than 5% below its own positive target (variance < -5%) in the selected month, and the immediately previous calendar month must have an explicit positive city target and a non-null actual. The same -5% rule labels the row; a prior-month material miss is not required.",
+      "comparison": "Listed only when current variance percentage minus previous variance percentage is strictly less than -5 percentage points (worsened by >5pp), evaluated with exact integer arithmetic before display rounding.",
+      "statuses": "persistent when the prior variance was also strictly less than -5% of its positive target, otherwise new_miss. failing_since is the previous month for persistent rows and the selected month for new_miss rows.",
       "scope": "Only currently returned page cities with an explicit plan city target are checked; pooled New launch fallback cities have no individual target and are never annotated.",
       "tier_scope": "The selected month's stored tier is the only tier source; the prior month's tier is not required to match.",
       "limits": "A city that missed both months but improved is not listed. The list is not only persistent misses: new_miss rows were not a material miss in the prior month. Absence is not evidence that a city met earlier targets or that the prior month was complete."

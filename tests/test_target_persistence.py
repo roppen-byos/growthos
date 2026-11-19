@@ -54,11 +54,11 @@ class TargetPersistenceTests(unittest.TestCase):
         self.assertEqual((persistence["persistent_city_count"], persistence["new_miss_city_count"]), (1, 0))
         row = persistence["rows"][0]
         self.assertEqual((row["city"], row["status"], row["failing_since"]), ("Alpha", "persistent", "2026-09"))
-        self.assertAlmostEqual(row["current_shortfall_pct"], 40.0)
-        self.assertAlmostEqual(row["previous_shortfall_pct"], 20.0)
-        self.assertAlmostEqual(row["shortfall_pct_delta"], 20.0)
+        self.assertAlmostEqual(row["current_variance_pct"], -40.0)
+        self.assertAlmostEqual(row["previous_variance_pct"], -20.0)
+        self.assertAlmostEqual(row["variance_pct_delta"], -20.0)
         # Existing returned rows stay unchanged; the table is additive.
-        self.assertNotIn("previous_shortfall_pct", result["rows"][0])
+        self.assertNotIn("previous_variance_pct", result["rows"][0])
 
     def test_exactly_five_percentage_point_widening_is_excluded(self):
         data, sep, oct_ = self.build(
@@ -67,7 +67,7 @@ class TargetPersistenceTests(unittest.TestCase):
         persistence = target_cities(
             data, oct_, "2026-10", mode="all", previous_targets=sep)["persistent_failure"]
         self.assertEqual(persistence["city_count"], 0)
-        self.assertEqual(persistence["excluded_city_counts"]["shortfall_pct_delta_not_above_5"], 1)
+        self.assertEqual(persistence["excluded_city_counts"]["variance_pct_delta_not_below_minus_5"], 1)
 
     def test_prior_exactly_five_percent_is_labelled_new_miss(self):
         data, sep, oct_ = self.build(
@@ -88,7 +88,8 @@ class TargetPersistenceTests(unittest.TestCase):
         persistence = target_cities(
             data, oct_, "2026-10", mode="all", previous_targets=sep)["persistent_failure"]
         self.assertEqual(persistence["rows"][0]["status"], "new_miss")
-        self.assertAlmostEqual(persistence["rows"][0]["previous_shortfall_pct"], -20.0)
+        self.assertAlmostEqual(persistence["rows"][0]["previous_variance_pct"], 20.0)
+        self.assertAlmostEqual(persistence["rows"][0]["variance_pct_delta"], -60.0)
         self.assertTrue(any("not a material miss in 2026-09" in w for w in persistence["warnings"]))
 
     def test_improving_but_still_failing_city_is_not_listed(self):
@@ -98,7 +99,7 @@ class TargetPersistenceTests(unittest.TestCase):
         persistence = target_cities(
             data, oct_, "2026-10", mode="all", previous_targets=sep)["persistent_failure"]
         self.assertEqual(persistence["city_count"], 0)
-        self.assertEqual(persistence["excluded_city_counts"]["shortfall_pct_delta_not_above_5"], 1)
+        self.assertEqual(persistence["excluded_city_counts"]["variance_pct_delta_not_below_minus_5"], 1)
 
     def test_missing_prior_operands_are_undetermined(self):
         data, sep, oct_ = self.build(

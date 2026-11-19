@@ -47,7 +47,9 @@ class TargetAnalysisTests(unittest.TestCase):
         large = 20 * ((2**63 - 1) // 20)
         self.assertFalse(target_attainment(large, large - large // 20).qualifies)
         self.assertTrue(target_attainment(large, large - large // 20 - 1).qualifies)
-        self.assertEqual(target_attainment(1000, 949).shortfall_pct, 5.1)
+        self.assertEqual(target_attainment(1000, 949).variance_pct, -5.1)
+        self.assertEqual(target_attainment(1000, 949).variance, -51)
+        self.assertEqual(target_attainment(1000, 1050).variance_pct, 5.0)
 
     def test_descending_shortfall_city_ties_and_cumulative_overshoot(self):
         result = target_cities(self.actuals, self.targets, "2026-10")
@@ -111,8 +113,8 @@ class TargetAnalysisTests(unittest.TestCase):
         self.assertEqual(result["coverage"]["excluded_city_counts"]["nonpositive_target"], 1)
         summary = result["fallback"]
         self.assertEqual(
-            (summary["target"], summary["actual"], summary["shortfall"], summary["shortfall_pct"], summary["qualifies"]),
-            (100, 40, 60, 60, True),
+            (summary["target"], summary["actual"], summary["variance"], summary["variance_pct"], summary["qualifies"]),
+            (100, 40, -60, -60, True),
         )
         self.assertEqual(
             (summary["city_count"], summary["observed_city_count"], summary["skipped_null_city_count"]),
@@ -143,7 +145,7 @@ class TargetAnalysisTests(unittest.TestCase):
         self.assertEqual(result["coverage"]["fallback_city_count"], 1)
         self.assertEqual(result["fallback"]["city_count"], 1)
         self.assertEqual((result["fallback"]["target"], result["fallback"]["actual"]), (0, 1))
-        self.assertEqual(result["fallback"]["shortfall"], -1)
+        self.assertEqual(result["fallback"]["variance"], 1)
         self.assertEqual(result["fallback"]["unavailable_reason"], "nonpositive_target")
         self.assertFalse(result["fallback"]["qualifies"])
         rows = target_cities(actuals, targets, "2026-10", queue="fallback")["rows"]
@@ -174,7 +176,7 @@ class TargetAnalysisTests(unittest.TestCase):
     def test_one_time_merged_review_does_not_double_actual(self):
         raw = plan([("Trivandrum", 100)]).data
         result = target_city_review(observations([("Trivandrum", 80)]), validate_targets(raw), "trivandrum")
-        self.assertEqual((result["target"], result["actual"], result["shortfall"], result["shortfall_pct"]), (100, 80, 20, 20))
+        self.assertEqual((result["target"], result["actual"], result["variance"], result["variance_pct"]), (100, 80, -20, -20))
 
 
 class TargetContractTests(unittest.TestCase):

@@ -55,7 +55,7 @@ class TargetActualTests(unittest.TestCase):
         facts = target_facts(data, targets, "2026-10")
         missing = next(r for r in facts["rows"] if r["city"] == "Install Only")
         self.assertIsNone(missing["actual"])
-        self.assertIsNone(missing["shortfall"])
+        self.assertIsNone(missing["variance"])
         self.assertFalse(missing["qualifies_for_shortlist"])
 
     def test_reported_october_inputs_replay_477_skips_and_calculate_x(self):
@@ -80,7 +80,7 @@ class TargetActualTests(unittest.TestCase):
         self.assertEqual(result["fallback"]["observed_city_count"], 844)
         self.assertEqual(result["fallback"]["skipped_null_city_count"], 477)
         self.assertEqual((result["fallback"]["target"], result["fallback"]["actual"]), (15000, 0))
-        self.assertEqual((result["fallback"]["shortfall"], result["fallback"]["qualifies"]), (15000, True))
+        self.assertEqual((result["fallback"]["variance"], result["fallback"]["qualifies"]), (-15000, True))
         fallback = target_cities(data, targets, "2026-10", queue="fallback")
         self.assertEqual(fallback["coverage"]["selected_city_count"], 1321)
         self.assertTrue(all(r["target_source"] == "new_launch" for r in fallback["rows"]))

@@ -23,11 +23,11 @@ class TargetFactsTests(unittest.TestCase):
         result = target_facts(self.actuals, self.targets, "2026-10")
         rows = {r["city"]: r for r in result["rows"]}
         self.assertEqual(len(rows), 6)
-        self.assertEqual((rows["Above"]["shortfall"], rows["Above"]["shortfall_pct"], rows["Above"]["attainment"]), (-100, -10, "above"))
-        self.assertEqual(rows["At"]["shortfall"], 0)
+        self.assertEqual((rows["Above"]["variance"], rows["Above"]["variance_pct"], rows["Above"]["attainment"]), (100, 10, "above"))
+        self.assertEqual(rows["At"]["variance"], 0)
         self.assertEqual(rows["At"]["attainment"], "at")
-        self.assertEqual(rows["Small Miss"]["shortfall"], 20)
-        self.assertEqual(rows["Exact Five"]["shortfall_pct"], 5)
+        self.assertEqual(rows["Small Miss"]["variance"], -20)
+        self.assertEqual(rows["Exact Five"]["variance_pct"], -5)
         self.assertFalse(rows["Exact Five"]["qualifies_for_shortlist"])
         self.assertTrue(rows["Large Miss"]["qualifies_for_shortlist"])
         self.assertEqual(rows["Missing"]["attainment"], "unavailable")
@@ -58,11 +58,11 @@ class TargetFactsTests(unittest.TestCase):
     def test_numeric_sort_directions_null_last_and_city_ties(self):
         actuals = observations([("Beta", 700), ("Alpha", 700), ("Above", 1200), ("Missing", None)])
         targets = plan([(c, 1000) for c in ("Beta", "Alpha", "Above", "Missing")])
-        descending = target_facts(actuals, targets, "2026-10", sort_by="shortfall", descending=True)
-        self.assertEqual([r["city"] for r in descending["rows"]], ["Alpha", "Beta", "Above", "Missing"])
-        ascending = target_facts(actuals, targets, "2026-10", sort_by="shortfall")
-        self.assertEqual([r["city"] for r in ascending["rows"]], ["Above", "Alpha", "Beta", "Missing"])
-        for sort_by in ("target", "actual", "shortfall-pct", "city"):
+        ascending = target_facts(actuals, targets, "2026-10", sort_by="variance")
+        self.assertEqual([r["city"] for r in ascending["rows"]], ["Alpha", "Beta", "Above", "Missing"])
+        descending = target_facts(actuals, targets, "2026-10", sort_by="variance", descending=True)
+        self.assertEqual([r["city"] for r in descending["rows"]], ["Above", "Alpha", "Beta", "Missing"])
+        for sort_by in ("target", "actual", "variance-pct", "city"):
             self.assertEqual(target_facts(actuals, targets, "2026-10", sort_by=sort_by)["row_count"], 4)
 
     def test_percent_sort_uses_exact_ratios_when_display_floats_tie(self):
@@ -70,8 +70,8 @@ class TargetFactsTests(unittest.TestCase):
         actual = target - target // 4
         result = target_facts(observations([("Alpha", actual), ("Beta", actual - 1)]),
                               plan([("Alpha", target), ("Beta", target)]), "2026-10",
-                              sort_by="shortfall-pct", descending=True)
-        self.assertEqual(result["rows"][0]["shortfall_pct"], result["rows"][1]["shortfall_pct"])
+                              sort_by="variance-pct")
+        self.assertEqual(result["rows"][0]["variance_pct"], result["rows"][1]["variance_pct"])
         self.assertEqual([r["city"] for r in result["rows"]], ["Beta", "Alpha"])
 
     def test_zero_and_missing_targets_remain_visible_with_reasons_not_fallback(self):
@@ -82,9 +82,9 @@ class TargetFactsTests(unittest.TestCase):
         self.assertEqual(result["fallback"]["city_count"], 1)
         self.assertEqual((result["fallback"]["target"], result["fallback"]["actual"]), (50, 10))
         self.assertEqual(rows["Zero"]["attainment"], "at")
-        self.assertEqual(rows["Zero"]["shortfall"], 0)
-        self.assertIsNone(rows["Zero"]["shortfall_pct"])
-        self.assertEqual(rows["Zero"]["shortfall_pct_unavailable_reason"], "nonpositive_target")
+        self.assertEqual(rows["Zero"]["variance"], 0)
+        self.assertIsNone(rows["Zero"]["variance_pct"])
+        self.assertEqual(rows["Zero"]["variance_pct_unavailable_reason"], "nonpositive_target")
         self.assertIsNone(rows["Blank"]["target"])
         self.assertEqual(rows["Blank"]["target_source"], "city")
         self.assertEqual(rows["Blank"]["target_unavailable_reason"], "missing_target")
@@ -102,10 +102,10 @@ class TargetFactsTests(unittest.TestCase):
         self.assertEqual((result["rows"][0]["target"], result["rows"][0]["actual"]), (100, 110))
 
     def test_pagination_follows_full_filter_and_sort_and_keeps_summary(self):
-        full = target_facts(self.actuals, self.targets, "2026-10", attainment="below", sort_by="shortfall", descending=True)
+        full = target_facts(self.actuals, self.targets, "2026-10", attainment="below", sort_by="variance")
         rows = []
         for offset in range(3):
-            page = target_facts(self.actuals, self.targets, "2026-10", attainment="below", sort_by="shortfall", descending=True, offset=offset, limit=1)
+            page = target_facts(self.actuals, self.targets, "2026-10", attainment="below", sort_by="variance", offset=offset, limit=1)
             self.assertEqual(page["coverage"], full["coverage"])
             rows.extend(page["rows"])
         self.assertEqual(rows, full["rows"])
@@ -116,10 +116,11 @@ class TargetFactsTests(unittest.TestCase):
         targets = plan([("Alpha", 1000), ("Beta", 1000)], overall=1000)
         facts = target_facts(actuals, targets, "2026-10")
         self.assertEqual(facts["overall"]["shortfall"], 0)
+        self.assertEqual(facts["overall"]["variance"], 780)
         self.assertEqual(facts["row_count"], 2)
         selected = target_cities(actuals, targets, "2026-10", mode="all")
         self.assertEqual([r["city"] for r in selected["rows"]], ["Alpha"])
-        for key in ("target", "actual", "shortfall", "shortfall_pct", "target_source"):
+        for key in ("target", "actual", "variance", "variance_pct", "target_source"):
             self.assertEqual(selected["rows"][0][key], facts["rows"][0][key])
 
     def test_invalid_parameters_are_rejected_without_echoing_values(self):

@@ -33,9 +33,9 @@ SERVICE_MAP = {
 
 
 PERSISTENCE_CRITERIA = (
-    "current shortfall strictly >5% of the city's own positive target, an evaluable prior month, "
-    "and current_shortfall_pct - previous_shortfall_pct > 5 percentage points; "
-    "status is persistent when the prior shortfall was also strictly >5%, otherwise new_miss"
+    "current variance strictly < -5% of the city's own positive target, an evaluable prior month, "
+    "and current_variance_pct - previous_variance_pct < -5 percentage points; "
+    "status is persistent when the prior variance was also strictly < -5%, otherwise new_miss"
 )
 
 
@@ -69,12 +69,12 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         gap = target_attainment(target, actual)
         rows.append({
             "city_key": key, "city": row["city"] if row else source["city"], "target": target, "actual": actual,
-            "shortfall": gap.shortfall, "shortfall_pct": gap.shortfall_pct,
+            "variance": gap.variance, "variance_pct": gap.variance_pct,
             "target_source": "new_launch" if pooled else "city",
             "attainment": gap.attainment, "qualifies_for_shortlist": gap.qualifies,
             "actual_unavailable_reason": "missing_city_observation" if row is None else "missing_platform_ftu" if actual is None else None,
             "target_unavailable_reason": "pooled_new_launch_target" if pooled else "missing_target" if target is None else None,
-            "shortfall_pct_unavailable_reason": gap.reason,
+            "variance_pct_unavailable_reason": gap.reason,
         })
     def complete_sum(values):
         return None if any(v is None for v in values) else sum(values)
@@ -90,7 +90,7 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         fallback_reason = fallback_gap.reason
     fallback_summary = {
         "target": fallback["platform_ftu_target"], "actual": pool.value,
-        "shortfall": fallback_gap.shortfall, "shortfall_pct": fallback_gap.shortfall_pct,
+        "variance": fallback_gap.variance, "variance_pct": fallback_gap.variance_pct,
         "qualifies": fallback_gap.qualifies, "city_count": len(fallback_keys),
         "observed_city_count": pool.observed_city_count,
         "skipped_null_city_count": pool.skipped_null_ftu_city_count,
@@ -118,6 +118,7 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         missing_target_reason = "missing_overall_target"
     x_reason = missing_target_reason if total is None else observed.reason
     x = None if x_reason else max(total - observed.value, 0)
+    overall_variance = None if x_reason else observed.value - total
     difference = None if tier or city_sum is None or total is None else city_sum - total
     reconciliation = {
         "explicit_city_target_sum": city_sum, "city_targets_minus_grand_total": difference,
@@ -135,12 +136,12 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         }
     result = {
         **provenance(dataset, data=data), "month": period, "metric": "platform_ftu",
-        "units": {"target": "customers", "actual": "customers", "shortfall": "customers",
-                  "shortfall_pct": "percent",
+        "units": {"target": "customers", "actual": "customers", "variance": "customers",
+                  "variance_pct": "percent",
                   **({"cumulative_shortfall": "customers"} if include_cumulative_unit else {})},
         "overall": {"target": total, "target_source": target_source,
                     "actual": observed.value, "actual_coverage": observed.to_dict(),
-                    "shortfall": x, "unavailable_reason": x_reason},
+                    "variance": overall_variance, "shortfall": x, "unavailable_reason": x_reason},
         "reconciliation": reconciliation,
         "fallback": fallback_summary,
     }
@@ -165,7 +166,7 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
     return result, rows, counts
 
 
-TARGET_ROW_FIELDS = ("city_key", "city", "target", "actual", "shortfall", "shortfall_pct",
+TARGET_ROW_FIELDS = ("city_key", "city", "target", "actual", "variance", "variance_pct",
                      "target_source")
 
 
@@ -189,7 +190,7 @@ def _rank_target_rows(rows: list[dict]) -> tuple[list[dict], dict[str, int]]:
             excluded[reason] += 1
         else:
             eligible.append({k: row[k] for k in TARGET_ROW_FIELDS})
-    eligible.sort(key=lambda r: (-r["shortfall"], r["city"], r["city_key"]))
+    eligible.sort(key=lambda r: (r["variance"], r["city"], r["city_key"]))
     return eligible, excluded
 
 
@@ -197,12 +198,12 @@ def _persistent_failure(
     page_rows: list[dict], dataset: MonthlyData, previous_targets: TargetMonth | None,
     period: str, *, tier: str | None = None, queue: str = "matched",
 ) -> dict:
-    """Annotate a page with material misses whose shortfall widened against the prior month."""
+    """Annotate a page with material misses whose variance worsened against the prior month."""
     prior = previous_month(period)
     excluded = {
         "missing_prior_city_observation": 0, "missing_prior_target": 0,
         "nonpositive_prior_target": 0, "missing_prior_actual": 0,
-        "shortfall_pct_delta_not_above_5": 0,
+        "variance_pct_delta_not_below_minus_5": 0,
     }
     result = {
         "available": False, "previous_month": prior, "criteria": PERSISTENCE_CRITERIA,
@@ -234,8 +235,8 @@ def _persistent_failure(
     rows, checked = [], 0
     for row in page_rows:
         target, actual = row["target"], row["actual"]
-        current_shortfall = None if target is None or actual is None else target - actual
-        if current_shortfall is None or target <= 0 or 20 * current_shortfall <= target:
+        current_variance = None if target is None or actual is None else actual - target
+        if current_variance is None or target <= 0 or 20 * current_variance >= -target:
             continue
         checked += 1
         key = row["city_key"]
@@ -251,20 +252,20 @@ def _persistent_failure(
         elif fact["platform_ftu"] is None:
             reason = "missing_prior_actual"
         else:
-            prior_shortfall = prior_target - fact["platform_ftu"]
-            if 20 * current_shortfall * prior_target - 20 * prior_shortfall * target <= target * prior_target:
-                reason = "shortfall_pct_delta_not_above_5"
+            prior_variance = fact["platform_ftu"] - prior_target
+            if 20 * current_variance * prior_target - 20 * prior_variance * target >= -target * prior_target:
+                reason = "variance_pct_delta_not_below_minus_5"
             else:
                 reason = None
         if reason is None:
-            current_pct = 100 * current_shortfall / target
-            prior_pct = 100 * prior_shortfall / prior_target
-            persistent = 20 * prior_shortfall > prior_target
+            current_pct = 100 * current_variance / target
+            prior_pct = 100 * prior_variance / prior_target
+            persistent = 20 * prior_variance < -prior_target
             rows.append({
                 "city_key": key, "city": row["city"], "status": "persistent" if persistent else "new_miss",
-                "current_shortfall_pct": current_pct,
-                "previous_shortfall_pct": prior_pct,
-                "shortfall_pct_delta": current_pct - prior_pct,
+                "current_variance_pct": current_pct,
+                "previous_variance_pct": prior_pct,
+                "variance_pct_delta": current_pct - prior_pct,
                 "failing_since": prior if persistent else period,
             })
         else:
@@ -281,8 +282,8 @@ def _persistent_failure(
         "undetermined_city_count": undetermined,
     })
     result["warnings"].append(
-        "Listed rows are material current misses whose shortfall percentage widened by more than "
-        "5 percentage points; status marks prior-month persistence. A city that missed both months "
+        "Listed rows are material current misses whose variance percentage worsened by more than "
+        "5 percentage points (< -5pp); status marks prior-month persistence. A city that missed both months "
         "but improved is not listed.")
     if result["new_miss_city_count"]:
         result["warnings"].append(
@@ -321,7 +322,7 @@ def target_cities(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         coverage = {
             "requested_shortfall": None, "selected_shortfall": None,
             "covered_amount": None, "uncovered_amount": None, "overshoot": None,
-            "eligible_shortfall": result["fallback"]["shortfall"], **counts,
+            "eligible_variance": result["fallback"]["variance"], **counts,
             "selected_city_count": len(items), "excluded_city_counts": {},
             "selection_status": "pooled_new_launch",
         }
@@ -330,7 +331,7 @@ def target_cities(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         for row in matched_eligible:
             if mode == "top" and (x is None or cumulative >= x):
                 break
-            cumulative += row["shortfall"]
+            cumulative += -row["variance"]
             selected.append({**row, "cumulative_shortfall": cumulative})
         items = selected
         coverage = {
@@ -338,7 +339,7 @@ def target_cities(dataset: MonthlyData, targets: TargetMonth, period: str, *,
             "covered_amount": None if x is None else min(x, cumulative),
             "uncovered_amount": None if x is None else max(x - cumulative, 0),
             "overshoot": None if x is None else max(cumulative - x, 0),
-            "eligible_shortfall": sum(r["shortfall"] for r in matched_eligible), **counts,
+            "eligible_shortfall": sum(-r["variance"] for r in matched_eligible), **counts,
             "eligible_city_count": len(matched_eligible), "selected_city_count": len(selected),
             "excluded_city_counts": matched_excluded,
             "selection_status": "overall_shortfall_unavailable" if mode == "top" and x is None else "complete",
@@ -346,7 +347,7 @@ def target_cities(dataset: MonthlyData, targets: TargetMonth, period: str, *,
     page = items[offset:offset + limit]
     result.update({
         "operation": "target-analysis", "mode": mode, "queue": queue,
-        "eligibility": "shortfall > 5% of own positive target; missing operands excluded",
+        "eligibility": "variance < -5% of own positive target; missing operands excluded",
         "coverage": {**coverage, "queue": queue},
         "rows": page, "row_count": len(page), "offset": offset, "limit": limit,
         "next_offset": offset + limit if offset + limit < len(items) else None,
@@ -381,7 +382,7 @@ def target_facts(dataset: MonthlyData, targets: TargetMonth, period: str, *,
             "attainment_counts": {state: sum(r["attainment"] == state for r in selected)
                                   for state in ("above", "at", "below", "unavailable")},
             "unavailable_counts": {field: sum(r[field] is None for r in selected)
-                                   for field in ("actual", "target", "shortfall_pct")},
+                                   for field in ("actual", "target", "variance_pct")},
         },
         "rows": page, "row_count": len(page), "offset": offset, "limit": limit,
         "next_offset": offset + limit if offset + limit < len(selected) else None,
@@ -408,8 +409,8 @@ def target_city_review(dataset: MonthlyData, targets: TargetMonth, city_key: str
     gap = target_attainment(target_value, actual_value)
     return {
         **provenance(dataset, data=data), "month": period, "city_key": city_key,
-        "target": target_value, "actual": actual_value, "shortfall": gap.shortfall,
-        "shortfall_pct": gap.shortfall_pct, "above_5_percent": gap.qualifies,
+        "target": target_value, "actual": actual_value, "variance": gap.variance,
+        "variance_pct": gap.variance_pct, "above_5_percent": gap.qualifies,
         "unavailable_reason": gap.reason, "target_checksum": targets.result_checksum,
         "interpretation": "One-time merged-city review; separate source-city actuals cannot be reconstructed.",
     }

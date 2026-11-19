@@ -99,7 +99,7 @@ def validate_target_request(value: str, mode: str, offset: int, limit: int, *, n
 
 
 TARGET_ATTAINMENTS = ("all", "above", "at", "below", "unavailable")
-TARGET_FACT_SORTS = ("city", "target", "actual", "shortfall", "shortfall-pct")
+TARGET_FACT_SORTS = ("city", "target", "actual", "variance", "variance-pct")
 
 INVESTIGATION_MAX_CITIES = 25
 INVESTIGATION_MAX_GROUPS = 5
@@ -172,8 +172,8 @@ def select_target_facts(rows: list[dict], *, cities: list[str] | None,
     field = sort_by.replace("-", "_")
     known = [r for r in selected if r[field] is not None]
     unavailable = [r for r in selected if r[field] is None]
-    if sort_by == "shortfall-pct":
-        known.sort(key=lambda r: Fraction(r["shortfall"], r["target"]), reverse=descending)
+    if sort_by == "variance-pct":
+        known.sort(key=lambda r: Fraction(r["variance"], r["target"]), reverse=descending)
     else:
         known.sort(key=lambda r: r[field], reverse=descending)
     return known + unavailable

@@ -78,7 +78,7 @@ class InvestigationCalculationTests(unittest.TestCase):
     def test_over_explained_is_retained_and_flagged(self):
         block = only(self.one(800, 1500), "city")
         self.assertEqual((block["registration_effect"], block["unexplained_gap"]),
-                         (250.0, -50.0))
+                         (-250.0, 50.0))
         self.assertEqual(block["contribution_pct"], 125.0)
         self.assertEqual((block["verdict"], block["flags"]), ("registration_priority", ["over_explained"]))
 
@@ -86,7 +86,7 @@ class InvestigationCalculationTests(unittest.TestCase):
         block = only(self.one(800, 2100), "city")
         self.assertEqual(block["contribution_pct"], -25.0)
         self.assertEqual((block["verdict"], block["reason"]),
-                         ("no_registration_shortfall", "registration_effect_nonpositive"))
+                         ("no_registration_shortfall", "registration_effect_nonnegative"))
         self.assertEqual(block["flags"], [])
 
     def test_target_met_is_not_applicable_and_never_prioritised(self):
@@ -143,7 +143,7 @@ class InvestigationCalculationTests(unittest.TestCase):
                         tier="T1", national=True)
         tier = only(result, "tier")
         self.assertEqual((tier["registration_effect"], tier["ftu_gap"], tier["contribution_pct"]),
-                         (210.0, 300, 70.0))
+                         (-210.0, -300, 70.0))
         self.assertEqual(tier["verdict"], "other_factors_undetermined")
         self.assertEqual(tier["coverage"], {"member_city_count": 2, "blocked_city_count": 0,
                                             "unplanned_city_count": 1})
@@ -159,7 +159,7 @@ class InvestigationCalculationTests(unittest.TestCase):
         self.assertEqual((tier["verdict"], tier["reason"]),
                          ("undetermined", "incomplete_group_member"))
         self.assertEqual(tier["blocking_city_keys"], ["bravo"])
-        self.assertEqual((tier["registration_effect"], tier["ftu_gap"]), (None, 300))
+        self.assertEqual((tier["registration_effect"], tier["ftu_gap"]), (None, -300))
         self.assertIsNone(tier["contribution_pct"])
 
     def test_explicit_group_is_separate_from_tier_and_requires_every_member(self):
@@ -169,7 +169,7 @@ class InvestigationCalculationTests(unittest.TestCase):
         result = report(rows, plans, groups=[("South", ["Alpha", "Bravo"])])
         group = only(result, "group")
         self.assertEqual((group["registration_effect"], group["ftu_gap"], group["contribution_pct"]),
-                         (210.0, 300, 70.0))
+                         (-210.0, -300, 70.0))
 
         blocked = report(rows, plans, groups=[("Mixed", ["Alpha", "Echo"])])
         group = only(blocked, "group")

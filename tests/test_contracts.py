@@ -2,7 +2,7 @@ import copy
 import unittest
 from datetime import datetime, timezone
 
-from growthos.contracts import MAX_FACTS, RATIOS, VOLUMES, month_range, reporting_schema_sql, validate_data
+from growthos.contracts import MAX_FACTS, RATIOS, VOLUMES, funnel_metrics_sql, month_range, reporting_schema_sql, validate_data
 from growthos.classification import EXPLICIT_MERGES, MERGED_SOURCE_CITIES, normalize_city_key, resolve_city
 from growthos.errors import GrowthOSError
 from growthos.metrics import ALL_METRICS, _load_metric_registry, definitions, metric_registry
@@ -121,6 +121,11 @@ class ContractTests(unittest.TestCase):
         self.assertIn("CREATE TABLE irf.month_metadata", sql)
         self.assertIn("CREATE TABLE irf.facts", sql)
         self.assertIn("tier IN ('T1','T2','T3')", sql)
+        for metric in ("fe_sessions", "rr", "net", "bike_rr", "bike_net", "auto_rr", "auto_net", "cab_rr", "cab_net"):
+            self.assertIn(metric, sql)
+        migration = funnel_metrics_sql()
+        self.assertIn("ADD COLUMN IF NOT EXISTS fe_sessions", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS bike_net", migration)
 
     def test_metric_registry_contract_shape_and_tamper_rejection(self):
         import json
@@ -144,13 +149,14 @@ class ContractTests(unittest.TestCase):
 
         targets = store["targets"]
         self.assertEqual(set(targets), {
-            "platform_ftu_target", "target_shortfall", "shortfall_percentage", "target_shortlist",
+            "platform_ftu_target", "target_variance", "variance_percentage", "target_shortlist",
             "target_persistence"})
         self.assertEqual(set(targets["platform_ftu_target"]["components"]), {
             "grand_total", "city_target", "new_launch_fallback"})
-        self.assertEqual(targets["target_shortfall"]["formula"], "target - actual")
+        self.assertEqual(targets["target_variance"]["formula"], "actual - target")
+        self.assertEqual(targets["variance_percentage"]["formula"], "100 * (actual - target) / target")
         self.assertIn("5%", targets["target_shortlist"]["eligibility"])
-        self.assertIn("5 percentage points", targets["target_persistence"]["comparison"])
+        self.assertIn("-5 percentage points", targets["target_persistence"]["comparison"])
         self.assertIn("new_miss", targets["target_persistence"]["statuses"])
 
         defs = definitions()

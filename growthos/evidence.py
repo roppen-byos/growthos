@@ -14,8 +14,8 @@ TIER_RECLASSIFIED_WARNING = "City tier assignments changed across compared month
 TARGET_OPERANDS_WARNING = "Some target or actual operands are unavailable; cities with missing operands cannot qualify. Overall recorded FTU excludes null city FTU values."
 TARGET_FACT_OPERANDS_WARNING = "Some target or actual operands are unavailable; missing city observations remain visible in facts. Overall recorded FTU excludes null city FTU values."
 OVER_EXPLAINED_WARNING = (
-    "Some scopes have a registration effect larger than the FTU gap (over 100 percent); "
-    "better-than-target FTU relative to registrations partly offsets the gap and the remainder is negative."
+    "Some scopes have a registration effect larger than the FTU miss (over 100 percent); "
+    "better-than-target FTU relative to registrations partly offsets the miss and the remainder is positive."
 )
 NATIONAL_COVERAGE_WARNING = (
     "National diagnosis uses the supplied Grand Total target pair with observed non-null actuals for both "

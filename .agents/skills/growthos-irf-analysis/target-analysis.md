@@ -18,7 +18,7 @@ Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation a
    | --- | --- |
    | Inspect target/actuals for a city, explain its gap, retrieve general observations | `target-facts`, optionally `--city CITY` (repeatable) |
    | Find cities above, exactly at, below target or with unavailable comparisons | `target-facts --attainment above\|at\|below\|unavailable` |
-   | Order observations by absolute/relative gap, target or actual | `target-facts --sort city\|shortfall\|shortfall-pct\|target\|actual`, optionally `--descending` |
+   | Order observations by absolute/relative variance, target or actual | `target-facts --sort city\|variance\|variance-pct\|target\|actual`, optionally `--descending` |
    | Select cities whose material gaps cover the overall shortfall | `target-analysis --mode top` |
    | List every city meeting the agreed material target-miss rule | `target-analysis --mode all` |
    | Inspect the pooled New launch fallback comparison and its city breakdown | `target-analysis --queue fallback` |
@@ -41,7 +41,7 @@ Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation a
 3. **Read evidence.** Select the matching command and parameters, for example:
    ```bash
    .venv/bin/python -m growthos target-facts --month YYYY-MM --city Delhi
-   .venv/bin/python -m growthos target-facts --month YYYY-MM --attainment above --sort shortfall
+   .venv/bin/python -m growthos target-facts --month YYYY-MM --attainment above --sort variance --descending
    .venv/bin/python -m growthos target-analysis --month YYYY-MM --mode top
    .venv/bin/python -m growthos target-analysis --month YYYY-MM --mode all
    .venv/bin/python -m growthos target-analysis --month YYYY-MM --mode top --tier T2
@@ -57,36 +57,36 @@ Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation a
    with returned/total counts. Compare actual `result_checksum` and month metadata
    across pages; if they change, restart collection.
 4. **Answer.** Follow [output-format.md](output-format.md). Lead with the month,
-   overall target/actual/shortfall and the requested city/query scope.
-   With `scope.tier` present, label these **tier target/actual/gap**, not national
+   overall target/actual/variance (and gap to cover) and the requested city/query scope.
+   With `scope.tier` present, label these **tier target/actual/variance**, not national
    totals. Coverage means the selected tier's own gap; report that tier's skipped
    null counts and the tool's target-source/reconciliation caveat.
-   Include the tool's city, target, actual, shortfall and shortfall %. For selection,
-   also include cumulative shortfall, coverage, uncovered amount and overshoot.
+   Include the tool's city, target, actual, variance and variance %. For selection,
+   also include cumulative shortfall covered, coverage, uncovered amount and overshoot.
    Preserve exact ordering and disclose missing-value reasons/exclusions,
    reconciliation differences and the recorded actual-month provenance. Report the separate pooled
-   fallback target/actual/shortfall (`fallback.*`), `fallback.city_count`,
+   fallback target/actual/variance (`fallback.*`), `fallback.city_count`,
    `fallback.skipped_null_city_count` and `fallback.qualifies` beside the plan-matched
    result, and ask before listing the actual-only fallback breakdown.
    When `persistent_failure.available` is true, render its `rows` as a second
-   table headed “Widening target misses vs <previous_month> (>5pp)”, with
-   city, `status`, current shortfall %, previous shortfall %, change in pp and
+   table headed “Widening target misses vs <previous_month> (< -5pp)”, with
+   city, `status`, current variance %, previous variance %, change in pp and
    `failing_since`. Report `city_count`, `persistent_city_count`,
    `new_miss_city_count` and `undetermined_city_count` beside it. `persistent`
-   means the prior month was also a >5% miss; `new_miss` means it was not. Never
+   means the prior month was also a >5% miss (`variance < -5%`); `new_miss` means it was not. Never
    describe the table as only persistent misses.
    This is additive: never replace, reorder or filter the main shortlist because
    of it. If `available` is false, state the returned reason and do not show the
-   table; if `city_count` is zero, say no returned city also widened by >5pp.
+   table; if `city_count` is zero, say no returned city also worsened by >5pp.
    The object annotates only the returned page, so re-check it after paging.
    When `overall.actual_coverage.skipped_null_ftu_city_count` is nonzero, disclose
    that count beside the headline: these cities were skipped in overall recorded
    Platform FTU, not converted to zero. Use `install_or_registration_only_city_count`
    for the subset with only Installs or Registrations. If other null patterns exist,
    report their counts separately rather than claiming all skipped cities had only Installs or Registrations.
-   `shortfall_pct` is already a percentage; append `%` without multiplying again.
-   `shortfall = target - actual`: a miss has a positive shortfall; preserve the
-   returned sign, not actual-minus-target movement.
+   `variance_pct` is already a percentage; append `%` without multiplying again.
+   `variance = actual - target`: a miss is negative (`-`), an overshoot is positive (`+`),
+   and worsening vs prior month is negative (`-pp`). Prefix positive variances with `+` and retain negative signs.
    For all-city requests, deliver every selected row, in clearly labeled batches
    if needed. If delivery is incomplete, state returned/total counts and never
    describe it as the complete list. Do not save/export reports as a substitute.
@@ -109,13 +109,14 @@ growthos investigate --month 2026-10 --city Mumbai --start 2026-06 --end 2026-10
   cities are always separate blocks; nothing is summed unless a group or tier is
   explicitly requested.
 - Arithmetic per scope: target ratio = FTU target / registration target; expected
-  FTU = registration actual × ratio; registration effect = FTU target − expected
-  FTU; contribution = registration effect / FTU gap. All decisions use exact
-  rational arithmetic; the floats are display only.
+  FTU = registration actual × ratio; FTU gap = actual FTU − FTU target;
+  registration effect = expected FTU − FTU target; contribution = registration
+  effect / FTU gap. All decisions use exact rational arithmetic; the floats are display only.
 - Verdicts: `registration_priority` only when contribution is strictly above 70%;
   `other_factors_undetermined` at or below 70%; `no_registration_shortfall` when
-  the effect is zero or negative; `not_applicable` when the FTU gap is zero or
-  negative; `undetermined` with a specific reason when any operand is unavailable.
+  the registration effect is zero or positive (no registration miss); `not_applicable`
+  when the FTU gap is zero or positive (target met or exceeded); `undetermined`
+  with a specific reason when any operand is unavailable.
   There is no additional registration-miss gate. Null is never treated as zero.
 - Always report the returned `verdict` for every scope and state the rule once:
   strictly above 70% prioritises registration investigation, at or below 70% does
@@ -124,7 +125,7 @@ growthos investigate --month 2026-10 --city Mumbai --start 2026-06 --end 2026-10
   below-70% scope as "partly explained", without its verdict. Mark `over_explained`
   scopes as partial offsets.
 - Contribution above 100% is retained with the `over_explained` flag and a
-  negative `unexplained_gap`; report it as partial offset, not as an error.
+  positive `unexplained_gap` (actual FTU above expected); report it as partial offset, not as an error.
 - Tier contributions sum member effects and gaps and are unavailable unless every
   member is calculable; `blocking_city_keys` names the members that block it.
   Unplanned tier cities are excluded and covered only by the pooled New launch
@@ -183,20 +184,20 @@ rather than “plan” in new output.
   qualifying city observations.
 - Each observed city absent from the plan joins one **New launch fallback pool**.
   The monthly New launch target is compared against the pool's combined non-null
-  Platform FTU, giving one target/actual/shortfall/shortfall %; null pool cities
+  Platform FTU, giving one target/actual/variance/variance %; null pool cities
   are skipped and disclosed, not zeroed. Unplanned cities have no individual
-  target or shortfall and are never ranked inside the plan-matched queue.
+  target or variance and are never ranked inside the plan-matched queue.
   `target-analysis` always reports this pooled comparison (never added to the
   national Grand Total or any tier gap); `--queue fallback` returns it with an
   actual-only city breakdown. The fallback is a planning assumption, not proof of
   launch, an allocation or a shared per-city budget. Explicit missing/zero plan
   targets do not join the pool.
 - The additive `persistent_failure` object lists currently returned material misses
-  whose shortfall percentage widened by more than 5 percentage points against the
+  whose variance percentage worsened by more than 5 percentage points (`< -5pp`) against the
   immediately previous calendar month, using exact integer arithmetic before display
   rounding. The prior month must have an explicit positive city target and actual;
-  its own shortfall sets the row's `status` but does not filter the row:
-  `persistent` when the prior shortfall was also strictly >5%, otherwise `new_miss`.
+  its own variance sets the row's `status` but does not filter the row:
+  `persistent` when the prior variance was also strictly `< -5%`, otherwise `new_miss`.
   `failing_since` is the prior month for persistent rows and the selected month for
   new misses. A city that missed both months but improved is not listed. Missing
   prior city/target/actual and nonpositive prior targets are undetermined, not

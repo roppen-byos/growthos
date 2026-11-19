@@ -16,29 +16,29 @@ ALL_METRICS = VOLUMES + tuple(RATIOS)
 
 @dataclass(frozen=True)
 class TargetAttainment:
-    shortfall: int | None
-    shortfall_pct: float | None
+    variance: int | None
+    variance_pct: float | None
     qualifies: bool
     reason: str | None
 
     @property
     def attainment(self) -> str:
-        if self.shortfall is None:
+        if self.variance is None:
             return "unavailable"
-        if self.shortfall > 0:
+        if self.variance < 0:
             return "below"
-        return "above" if self.shortfall < 0 else "at"
+        return "above" if self.variance > 0 else "at"
 
 
 def target_attainment(target: int | None, actual: int | None) -> TargetAttainment:
     """Eligibility uses exact integer arithmetic; percentage is presentation only."""
     if target is None or actual is None:
         return TargetAttainment(None, None, False, "missing_target_or_actual")
-    shortfall = target - actual
+    variance = actual - target
     if target <= 0:
-        return TargetAttainment(shortfall, None, False, "nonpositive_target")
-    return TargetAttainment(shortfall, 100 * shortfall / target,
-                            20 * shortfall > target, None)
+        return TargetAttainment(variance, None, False, "nonpositive_target")
+    return TargetAttainment(variance, 100 * variance / target,
+                            20 * variance < -target, None)
 
 
 @dataclass(frozen=True)
@@ -288,7 +288,7 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
         reject("SCHEMA", "Invalid link_vs_auto_share_gap definition in metric registry.")
 
     targets = payload["targets"]
-    target_keys = {"platform_ftu_target", "target_shortfall", "shortfall_percentage", "target_shortlist", "target_persistence"}
+    target_keys = {"platform_ftu_target", "target_variance", "variance_percentage", "target_shortlist", "target_persistence"}
     if not isinstance(targets, dict) or set(targets) != target_keys:
         reject("SCHEMA", "Metric registry targets do not match the approved target definitions.")
     for target_id, entry in targets.items():
@@ -308,8 +308,8 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
             or not text(component.get("label")) or not _long_text(component.get("definition"))
         ):
             reject("SCHEMA", "Invalid target plan component in metric registry.")
-    if not text(targets["target_shortfall"].get("formula")) or not text(targets["shortfall_percentage"].get("formula")):
-        reject("SCHEMA", "Target shortfall definitions must declare a formula.")
+    if not text(targets["target_variance"].get("formula")) or not text(targets["variance_percentage"].get("formula")):
+        reject("SCHEMA", "Target variance definitions must declare a formula.")
     shortlist = targets["target_shortlist"]
     for field in ("eligibility", "ordering", "coverage_selection", "match_queue", "fallback_queue", "tier_scope"):
         if not _long_text(shortlist.get(field)):
