@@ -26,7 +26,7 @@ data note without an empty table or full report.
 | --- | --- |
 | Two-month comparison | Bottom line, volume table, separate ratio/share table, explanation and limitations |
 | City ranking | Ranked table; state metric, delta/growth basis, direction, tier/filter and top-N scope |
-| Target lookup / attainment | Overall target/actual/variance (and gap to cover), requested city evidence and scope; use [target-analysis.md](target-analysis.md) for facts versus selection, units and full-list delivery |
+| Target lookup / attainment | Overall target/actual/variance (and gap to cover), requested city evidence and scope; use [target-analysis.md](target-analysis.md) for facts versus selection, units and paged delivery (first page, then ask before fetching more) |
 | Target persistence | Main shortlist table first; then a separate “Widening target misses vs <previous month> (< -5pp)” table with status (persistent/new_miss), current/prior variance %, pp change and failing-since month |
 | Ratio investigation | Ratio movement, both operands, then tier/city explanation and coverage caveats |
 | Master report | Overall funnel, tiers/services, city drivers, limitations; follow the playbook |

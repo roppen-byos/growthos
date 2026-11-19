@@ -48,13 +48,17 @@ Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation a
    .venv/bin/python -m growthos target-analysis --month YYYY-MM --tier T3 --queue fallback
    .venv/bin/python -m growthos target-facts --month YYYY-MM --tier T2 --city Jaipur
    ```
-   Run only the needed tools. Follow `next_offset` using
-   `--offset OFFSET`; `--limit` controls only page size, not matching/selection.
-   If a page hits `OUTPUT_BOUND`, reduce `--limit` and retry the same offset.
-   Done when evidence covers the requested scope: for an exhaustive facts query,
-   collect `coverage.matching_city_count`; for an exhaustive selection, collect
-   `coverage.selected_city_count`. A requested displayed subset must be labeled
-   with returned/total counts. Compare actual `result_checksum` and month metadata
+   Run only the needed tools. `--limit` controls only page size, not
+   matching/selection; request the first page (default 25) and do not
+   auto-follow `next_offset`. If a page hits `OUTPUT_BOUND`, reduce `--limit`
+   and retry the same offset. Present the first page, then offer to fetch the
+   next batch when `next_offset` is non-null. Fetch further pages only when the
+   user asks for them, one batch per request, using `--offset next_offset`.
+   Report `coverage.matching_city_count` (facts) or
+   `coverage.selected_city_count` (selection) plus `omitted_row_count` so the
+   user can see how much remains. Never describe a first page as the complete
+   list. A requested displayed subset must be labeled with returned/total
+   counts. Compare actual `result_checksum` and month metadata
    across pages; if they change, restart collection.
 4. **Answer.** Follow [output-format.md](output-format.md). Lead with the month,
    overall target/actual/variance (and gap to cover) and the requested city/query scope.
@@ -87,9 +91,12 @@ Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation a
    `variance_pct` is already a percentage; append `%` without multiplying again.
    `variance = actual - target`: a miss is negative (`-`), an overshoot is positive (`+`),
    and worsening vs prior month is negative (`-pp`). Prefix positive variances with `+` and retain negative signs.
-   For all-city requests, deliver every selected row, in clearly labeled batches
-   if needed. If delivery is incomplete, state returned/total counts and never
-   describe it as the complete list. Do not save/export reports as a substitute.
+   For all-city requests, deliver the first page as a labeled batch, state the
+   returned/total counts and rows remaining, and ask whether to fetch the next
+   page. Fetch further batches only on request, one page at a time, and keep the
+   batch label and counts consistent. Never describe a partial batch as the
+   complete list, and do not auto-paginate to the end. Do not save/export reports
+   as a substitute.
 
 ## Registration contribution investigation
 
