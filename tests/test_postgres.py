@@ -120,11 +120,9 @@ class ReaderTests(unittest.TestCase):
     def test_target_read_is_bounded_checked_and_matches_fixture(self):
         target = demo_targets()
         data = target.data
-        records = [{**r, "month": month(r["month"]), "source_checksum": data["source_checksum"],
-                    "imported_at": datetime.fromisoformat(data["imported_at"]),
-                    "month_checksum": target.result_checksum, "month_row_count": len(data["rows"])} for r in data["rows"]]
+        records = [{**r, "month": month(r["month"])} for r in data["rows"]]
         connection, cursor = self.connection()
-        cursor.fetchone.side_effect = [("irf.pftu_targets",), (True,)]
+        cursor.fetchone.side_effect = [("irf.targets", "irf.target_imports"), (True,)]
         cursor.fetchmany.return_value = [tuple(r[k] for k in TARGET_DB_FIELDS) for r in records]
         result = PostgresStore(connection).load_targets("2026-10")
         self.assertEqual(result, FixtureReaderStore(demo_data()).load_targets("2026-10"))
@@ -140,19 +138,28 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(PostgresStore(connection).target_months(), [])
         cursor.fetchmany.assert_not_called()
         connection, cursor = self.connection()
-        cursor.fetchone.return_value = ("irf.pftu_targets",)
+        cursor.fetchone.return_value = ("irf.target_imports",)
         cursor.fetchmany.return_value = [(date(2026, 9, 1),), (date(2026, 10, 1),)]
         self.assertEqual(PostgresStore(connection).target_months(), ["2026-09", "2026-10"])
         query, params = cursor.execute.call_args.args
-        self.assertIn("SELECT DISTINCT month", query)
+        self.assertIn("FROM irf.target_imports WHERE metric=%s", query)
         self.assertIn("LIMIT %s", query)
-        self.assertEqual(params, (13,))
+        self.assertEqual(params, ("platform_ftu", 13))
         cursor.fetchmany.assert_called_once_with(13)
 
+    def test_target_months_are_scoped_to_one_metric(self):
+        connection, cursor = self.connection()
+        cursor.fetchone.return_value = ("irf.target_imports",)
+        cursor.fetchmany.return_value = [(date(2026, 10, 1),)]
+        self.assertEqual(PostgresStore(connection).target_months("registrations"), ["2026-10"])
+        query, params = cursor.execute.call_args.args
+        self.assertIn("WHERE metric=%s", query)
+        self.assertEqual(params, ("registrations", 13))
+
     def test_target_permissions_missing_install_and_integrity_fail_closed(self):
-        for replies, code in (([(None,)], "TARGETS_UNAVAILABLE"),
-                              ([("irf.pftu_targets",), (False,)], "READ_ONLY_ROLE"),
-                              ([("irf.pftu_targets",), (None,)], "READ_ONLY_ROLE")):
+        for replies, code in (([(None, None)], "TARGETS_UNAVAILABLE"),
+                              ([("irf.targets", "irf.target_imports"), (False,)], "READ_ONLY_ROLE"),
+                              ([("irf.targets", "irf.target_imports"), (None,)], "READ_ONLY_ROLE")):
             connection, cursor = self.connection()
             cursor.fetchone.side_effect = replies
             with self.subTest(replies=replies), self.assertRaises(GrowthOSError) as caught:
@@ -160,7 +167,7 @@ class ReaderTests(unittest.TestCase):
             self.assertEqual(caught.exception.code, code)
             cursor.fetchmany.assert_not_called()
         connection, cursor = self.connection()
-        cursor.fetchone.side_effect = [("irf.pftu_targets",), (True,)]
+        cursor.fetchone.side_effect = [("irf.targets", "irf.target_imports"), (True,)]
         cursor.fetchmany.return_value = []
         with self.assertRaises(GrowthOSError) as caught:
             PostgresStore(connection).load_targets("2026-10")

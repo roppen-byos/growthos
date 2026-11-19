@@ -82,20 +82,20 @@ class FixtureReaderStore:
     def load_targets(self, value: str):
         return demo_targets(value)
 
-    def target_months(self) -> list[str]:
+    def target_months(self, metric: str = "platform_ftu") -> list[str]:
         return list(self._target_months)
 
 
 def demo_targets(value="2026-10"):
     from growthos.targets import validate_targets
     return validate_targets({
-        "month": value, "source_checksum": "a" * 64, "imported_at": "2026-11-02T00:01:00+00:00",
+        "month": value,
         "rows": [
             {"month": value, "kind": kind, "city_key": key, "city": city,
-             "target": count, "source_targets": [{"city": city, "target": count}]}
-            for kind, key, city, count in (
-                ("city", "harbor", "Harbor", 80), ("city", "vale", "Vale", 50),
-                ("new_launch", "", "New launch", 60), ("overall", "", "Grand Total", 150),
+             "platform_ftu_target": ftu, "registrations_target": regs}
+            for kind, key, city, ftu, regs in (
+                ("city", "harbor", "Harbor", 80, 160), ("city", "vale", "Vale", 50, 100),
+                ("new_launch", "", "New launch", 60, 120), ("overall", "", "Grand Total", 150, 300),
             )
         ],
     })

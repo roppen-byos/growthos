@@ -14,6 +14,11 @@ class TargetFactsTests(unittest.TestCase):
         self.targets = plan([(c, 1000) for c in (
             "Above", "At", "Small Miss", "Exact Five", "Large Miss", "Missing")], overall=6000)
 
+    def test_target_evidence_carries_no_stored_provenance(self):
+        result = target_facts(self.actuals, self.targets, "2026-10")
+        self.assertNotIn("target_provenance", result)
+        self.assertTrue(all("source_targets" not in row for row in result["rows"]))
+
     def test_default_lookup_includes_above_at_small_exact_and_large_misses(self):
         result = target_facts(self.actuals, self.targets, "2026-10")
         rows = {r["city"]: r for r in result["rows"]}
@@ -34,7 +39,7 @@ class TargetFactsTests(unittest.TestCase):
         full = target_facts(self.actuals, self.targets, "2026-10")
         filtered = target_facts(self.actuals, self.targets, "2026-10", cities=["above"])
         self.assertEqual([r["city"] for r in filtered["rows"]], ["Above"])
-        for key in ("overall", "target_provenance", "reconciliation"):
+        for key in ("overall", "reconciliation"):
             self.assertEqual(filtered[key], full[key])
         self.assertEqual(filtered["coverage"]["actual_city_count"], 6)
         self.assertEqual(filtered["coverage"]["matching_city_count"], 1)
@@ -92,14 +97,9 @@ class TargetFactsTests(unittest.TestCase):
     def test_canonical_alias_filter_keeps_merged_target_and_single_actual(self):
         actuals = observations([("Trivandrum", 110)])
         targets = plan([("Trivandrum", 100)])
-        raw = targets.data
-        next(r for r in raw["rows"] if r["kind"] == "city")["source_targets"] = [
-            {"city": "Attingal", "target": 30}, {"city": "Trivandrum", "target": 70}]
-        from growthos.targets import validate_targets
-        result = target_facts(actuals, validate_targets(raw), "2026-10", cities=["Attingal", "Trivandrum"])
+        result = target_facts(actuals, targets, "2026-10", cities=["Attingal", "Trivandrum"])
         self.assertEqual(result["row_count"], 1)
         self.assertEqual((result["rows"][0]["target"], result["rows"][0]["actual"]), (100, 110))
-        self.assertEqual(len(result["rows"][0]["source_targets"]), 2)
 
     def test_pagination_follows_full_filter_and_sort_and_keeps_summary(self):
         full = target_facts(self.actuals, self.targets, "2026-10", attainment="below", sort_by="shortfall", descending=True)
@@ -119,7 +119,7 @@ class TargetFactsTests(unittest.TestCase):
         self.assertEqual(facts["row_count"], 2)
         selected = target_cities(actuals, targets, "2026-10", mode="all")
         self.assertEqual([r["city"] for r in selected["rows"]], ["Alpha"])
-        for key in ("target", "actual", "shortfall", "shortfall_pct", "target_source", "source_targets"):
+        for key in ("target", "actual", "shortfall", "shortfall_pct", "target_source"):
             self.assertEqual(selected["rows"][0][key], facts["rows"][0][key])
 
     def test_invalid_parameters_are_rejected_without_echoing_values(self):

@@ -223,11 +223,12 @@ class CliTests(unittest.TestCase):
             plan = demo_targets(value).data
             plan["rows"] = [r for r in plan["rows"] if r["kind"] != "city"]
             for row in plan["rows"]:
-                row["target"] = 1000 if row["kind"] == "overall" else 100
-                row["source_targets"][0]["target"] = row["target"]
+                target_value = 1000 if row["kind"] == "overall" else 100
+                row["platform_ftu_target"] = target_value
+                row["registrations_target"] = 2 * target_value
             plan["rows"].append({
                 "month": value, "kind": "city", "city_key": "alpha", "city": "Alpha",
-                "target": 100, "source_targets": [{"city": "Alpha", "target": 100}]})
+                "platform_ftu_target": 100, "registrations_target": 200})
             return validate_targets(plan)
 
         @contextmanager

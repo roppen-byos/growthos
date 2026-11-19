@@ -27,11 +27,12 @@ def plan(month, values, *, overall=1000, fallback=100):
     raw = demo_targets(month).data
     raw["rows"] = [r for r in raw["rows"] if r["kind"] != "city"]
     for row in raw["rows"]:
-        row["target"] = overall if row["kind"] == "overall" else fallback
-        row["source_targets"][0]["target"] = row["target"]
+        value = overall if row["kind"] == "overall" else fallback
+        row["platform_ftu_target"] = value
+        row["registrations_target"] = 2 * value
     raw["rows"] += [
         {"month": month, "kind": "city", "city_key": normalize_city_key(city),
-         "city": city, "target": target, "source_targets": [{"city": city, "target": target}]}
+         "city": city, "platform_ftu_target": target, "registrations_target": 2 * target}
         for city, target in values
     ]
     return validate_targets(raw)

@@ -64,13 +64,12 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         source = explicit.get(key, fallback)
         actual = row["platform_ftu"] if row else None
         pooled = source is fallback
-        target = None if pooled else source["target"]
+        target = None if pooled else source["platform_ftu_target"]
         gap = target_attainment(target, actual)
         rows.append({
             "city_key": key, "city": row["city"] if row else source["city"], "target": target, "actual": actual,
             "shortfall": gap.shortfall, "shortfall_pct": gap.shortfall_pct,
             "target_source": "new_launch" if pooled else "city",
-            "source_targets": source["source_targets"],
             "attainment": gap.attainment, "qualifies_for_shortlist": gap.qualifies,
             "actual_unavailable_reason": "missing_city_observation" if row is None else "missing_platform_ftu" if actual is None else None,
             "target_unavailable_reason": "pooled_new_launch_target" if pooled else "missing_target" if target is None else None,
@@ -78,18 +77,18 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         })
     def complete_sum(values):
         return None if any(v is None for v in values) else sum(values)
-    city_sum = complete_sum([r["target"] for r in explicit.values()])
+    city_sum = complete_sum([r["platform_ftu_target"] for r in explicit.values()])
     pool_rows = [actuals[key] for key in fallback_keys]
     pool = observed_target_actuals(pool_rows)
-    fallback_gap = target_attainment(fallback["target"], pool.value)
-    if fallback["target"] is None:
+    fallback_gap = target_attainment(fallback["platform_ftu_target"], pool.value)
+    if fallback["platform_ftu_target"] is None:
         fallback_reason = "missing_new_launch_target"
     elif pool.value is None:
         fallback_reason = "no_observed_platform_ftu"
     else:
         fallback_reason = fallback_gap.reason
     fallback_summary = {
-        "target": fallback["target"], "actual": pool.value,
+        "target": fallback["platform_ftu_target"], "actual": pool.value,
         "shortfall": fallback_gap.shortfall, "shortfall_pct": fallback_gap.shortfall_pct,
         "qualifies": fallback_gap.qualifies, "city_count": len(fallback_keys),
         "observed_city_count": pool.observed_city_count,
@@ -100,20 +99,20 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
             "Platform FTU; it is not an allocation, per-city target, shared budget or launch evidence."
         ),
     }
-    matched_actual_target_sum = complete_sum([explicit[key]["target"] for key in matched_keys])
+    matched_actual_target_sum = complete_sum([explicit[key]["platform_ftu_target"] for key in matched_keys])
     if fallback_keys:
         effective_target_sum = (
-            None if matched_actual_target_sum is None or fallback["target"] is None
-            else matched_actual_target_sum + fallback["target"]
+            None if matched_actual_target_sum is None or fallback["platform_ftu_target"] is None
+            else matched_actual_target_sum + fallback["platform_ftu_target"]
         )
     else:
         effective_target_sum = matched_actual_target_sum
     if tier:
-        total = complete_sum([explicit[key]["target"] for key in matched_keys]) if matched_keys else None
+        total = complete_sum([explicit[key]["platform_ftu_target"] for key in matched_keys]) if matched_keys else None
         target_source = "tier_city_target_sum"
         missing_target_reason = "missing_tier_city_target" if matched_keys else "no_plan_matched_cities"
     else:
-        total = overall["target"]
+        total = overall["platform_ftu_target"]
         target_source = "Grand Total"
         missing_target_reason = "missing_overall_target"
     x_reason = missing_target_reason if total is None else observed.reason
@@ -121,14 +120,14 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
     difference = None if tier or city_sum is None or total is None else city_sum - total
     reconciliation = {
         "explicit_city_target_sum": city_sum, "city_targets_minus_grand_total": difference,
-        "new_launch_target": fallback["target"],
+        "new_launch_target": fallback["platform_ftu_target"],
         "effective_actual_city_target_sum": effective_target_sum,
         "overall_target_policy": "Grand Total is independent; the pooled New launch fallback never changes it",
     }
     if tier:
         reconciliation = {
             "tier_city_target_sum": total, "explicit_city_target_sum": city_sum,
-            "national_grand_total": overall["target"], "new_launch_target": fallback["target"],
+            "national_grand_total": overall["platform_ftu_target"], "new_launch_target": fallback["platform_ftu_target"],
             "plan_matched_city_target_sum": total,
             "effective_actual_city_target_sum": effective_target_sum,
             "overall_target_policy": "Tier target sums assigned targets of its plan-matched stored monthly city cohort; unplanned cities are outside that calculation and the national Grand Total is not used or allocated",
@@ -141,8 +140,6 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         "overall": {"target": total, "target_source": target_source,
                     "actual": observed.value, "actual_coverage": observed.to_dict(),
                     "shortfall": x, "unavailable_reason": x_reason},
-        "target_provenance": {"source_checksum": plan["source_checksum"],
-                              "result_checksum": targets.result_checksum, "imported_at": plan["imported_at"]},
         "reconciliation": reconciliation,
         "fallback": fallback_summary,
     }
@@ -168,7 +165,7 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
 
 
 TARGET_ROW_FIELDS = ("city_key", "city", "target", "actual", "shortfall", "shortfall_pct",
-                     "target_source", "source_targets")
+                     "target_source")
 
 
 def _target_row_reason(row: dict) -> str | None:
@@ -242,7 +239,7 @@ def _persistent_failure(
         key = row["city_key"]
         fact = prior_facts.get(key)
         target_row = prior_explicit.get(key)
-        prior_target = target_row["target"] if target_row else None
+        prior_target = target_row["platform_ftu_target"] if target_row else None
         if fact is None:
             reason = "missing_prior_city_observation"
         elif prior_target is None:
@@ -397,12 +394,11 @@ def target_city_review(dataset: MonthlyData, targets: TargetMonth, city_key: str
     period = plan["month"]
     target = next((r for r in plan["rows"] if r["kind"] == "city" and r["city_key"] == city_key), None)
     actual = next((r for r in data["facts"] if r["month"] == period and r["city_key"] == city_key), None)
-    target_value = target["target"] if target else None
+    target_value = target["platform_ftu_target"] if target else None
     actual_value = actual["platform_ftu"] if actual else None
     gap = target_attainment(target_value, actual_value)
     return {
         **provenance(dataset, data=data), "month": period, "city_key": city_key,
-        "source_targets": target["source_targets"] if target else [],
         "target": target_value, "actual": actual_value, "shortfall": gap.shortfall,
         "shortfall_pct": gap.shortfall_pct, "above_5_percent": gap.qualifies,
         "unavailable_reason": gap.reason, "target_checksum": targets.result_checksum,

@@ -53,8 +53,8 @@ Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation a
    Done when evidence covers the requested scope: for an exhaustive facts query,
    collect `coverage.matching_city_count`; for an exhaustive selection, collect
    `coverage.selected_city_count`. A requested displayed subset must be labeled
-   with returned/total counts. Compare actual `result_checksum`, month metadata
-   and `target_provenance` across pages; if they change, restart collection.
+   with returned/total counts. Compare actual `result_checksum` and month metadata
+   across pages; if they change, restart collection.
 4. **Answer.** Follow [output-format.md](output-format.md). Lead with the month,
    overall target/actual/shortfall and the requested city/query scope.
    With `scope.tier` present, label these **tier target/actual/gap**, not national
@@ -63,7 +63,7 @@ Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation a
    Include the tool's city, target, actual, shortfall and shortfall %. For selection,
    also include cumulative shortfall, coverage, uncovered amount and overshoot.
    Preserve exact ordering and disclose missing-value reasons/exclusions,
-   reconciliation differences and actual/target provenance. Report the separate pooled
+   reconciliation differences and the recorded actual-month provenance. Report the separate pooled
    fallback target/actual/shortfall (`fallback.*`), `fallback.city_count`,
    `fallback.skipped_null_city_count` and `fallback.qualifies` beside the plan-matched
    result, and ask before listing the actual-only fallback breakdown.
