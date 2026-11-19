@@ -6,7 +6,7 @@ from fractions import Fraction
 from zoneinfo import ZoneInfo
 
 from .classification import normalize_city_key
-from .contracts import TIERS, MonthlyData, month, next_month
+from .contracts import TIERS, MonthlyData, month, month_range, next_month
 from .errors import reject
 
 
@@ -81,12 +81,16 @@ def validate_top(top: int, limit: int = 100) -> int:
     return top
 
 
-def validate_target_request(value: str, mode: str, offset: int, limit: int, *, now=None) -> None:
+def _require_ended(value: str, *, now=None, operation: str = "Target analysis") -> None:
     selected = month(value)
     zone = ZoneInfo(BUSINESS_TIMEZONE)
     current = (now or datetime.now(timezone.utc)).astimezone(zone)
     if selected >= current.date().replace(day=1):
-        reject("INCOMPLETE_MONTH", f"Target analysis requires an ended calendar month in {BUSINESS_TIMEZONE}.")
+        reject("INCOMPLETE_MONTH", f"{operation} requires an ended calendar month in {BUSINESS_TIMEZONE}.")
+
+
+def validate_target_request(value: str, mode: str, offset: int, limit: int, *, now=None) -> None:
+    _require_ended(value, now=now)
     if mode not in ("top", "all"):
         reject("ARGUMENTS", "Target mode must be top or all.")
     if type(offset) is not int or not 0 <= offset <= 2**31 - 1:
@@ -98,6 +102,11 @@ def validate_target_request(value: str, mode: str, offset: int, limit: int, *, n
 TARGET_ATTAINMENTS = ("all", "above", "at", "below", "unavailable")
 TARGET_FACT_SORTS = ("city", "target", "actual", "shortfall", "shortfall-pct")
 
+INVESTIGATION_MAX_CITIES = 25
+INVESTIGATION_MAX_GROUPS = 5
+INVESTIGATION_MAX_GROUP_CITIES = 25
+INVESTIGATION_MAX_BLOCKS = 240
+
 
 def validate_target_facts_request(value: str, attainment: str, sort_by: str,
                                   descending: bool, offset: int, limit: int) -> None:
@@ -106,6 +115,50 @@ def validate_target_facts_request(value: str, attainment: str, sort_by: str,
         reject("ARGUMENTS", "Target attainment must be all, above, at, below or unavailable.")
     if sort_by not in TARGET_FACT_SORTS or type(descending) is not bool:
         reject("ARGUMENTS", "Use a reviewed target fact sort and boolean direction; run target-facts --help.")
+
+
+def parse_investigation_group(value: str) -> tuple[str, list[str]]:
+    """Parse one explicit Label:City,City group; membership is never inferred."""
+    label, separator, members = (value or "").partition(":")
+    label, members = label.strip(), members.strip()
+    if not separator or not label or len(label) > 40:
+        reject("ARGUMENTS", 'Each --group needs a label and a colon, for example --group "South:Trivandrum,Kochi".')
+    names = [item.strip() for item in members.split(",")]
+    if not 2 <= len(names) <= INVESTIGATION_MAX_GROUP_CITIES or any(not name for name in names):
+        reject("BOUNDS", f"A group needs between 2 and {INVESTIGATION_MAX_GROUP_CITIES} named cities.")
+    folded = [name.casefold() for name in names]
+    if len(set(folded)) != len(folded):
+        reject("ARGUMENTS", "A group cannot repeat a city.")
+    return label, names
+
+
+def validate_investigation_request(value: str, cities: list[str], groups: list[tuple[str, list[str]]],
+                                  start: str | None, end: str | None, *, now=None) -> list[str]:
+    """Bound the investigation selectors and resolve the requested month list."""
+    if (start is None) != (end is None):
+        reject("PERIOD", "Supply both --start and --end, or neither.")
+    months = [value] if start is None else month_range(start, end)
+    if value not in months:
+        reject("PERIOD", "--month must lie inside the requested --start/--end range.")
+    for item in months:
+        _require_ended(item, now=now, operation="Investigation")
+    if len(cities) > INVESTIGATION_MAX_CITIES:
+        reject("BOUNDS", f"Request at most {INVESTIGATION_MAX_CITIES} cities; each city is reported separately.")
+    if len(groups) > INVESTIGATION_MAX_GROUPS:
+        reject("BOUNDS", f"Request at most {INVESTIGATION_MAX_GROUPS} explicit groups.")
+    folded = [name.strip().casefold() for name in cities]
+    if len(set(folded)) != len(folded):
+        reject("ARGUMENTS", "Do not repeat a city; each named city is one block.")
+    labels = [label.casefold() for label, _ in groups]
+    if len(set(labels)) != len(labels):
+        reject("ARGUMENTS", "Use a distinct label for each explicit group.")
+    return months
+
+
+def investigation_block_count(months: list[str], cities: list[str], groups: list,
+                              tier: str | None, national: bool) -> int:
+    per_month = int(bool(national)) + len(cities) + len(groups) + int(tier is not None)
+    return per_month * len(months) + len(months)  # one pooled New launch block per month at most
 
 
 def select_target_facts(rows: list[dict], *, cities: list[str] | None,

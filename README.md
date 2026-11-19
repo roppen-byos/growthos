@@ -57,7 +57,7 @@ it does not certify source completeness or freshness.
 
 ## Platform FTU targets
 
-Ask Codex about city targets, target misses or tier-specific shortlists.
+Ask Codex about city targets, target misses, tier-specific shortlists, or how much of a same-month Platform FTU gap registration volume accounts for (`investigate`).
 See the [target analysis guide](.agents/skills/growthos-irf-analysis/target-analysis.md) for rules and command examples.
 
 ## Tests

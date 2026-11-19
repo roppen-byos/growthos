@@ -1,6 +1,6 @@
 ---
 name: growthos-irf-analysis
-description: "Answer GrowthOS IRF questions: PFTU target/actual lookup and attainment rankings, coverage-based target shortlists, master reports, ratio investigations, monthly trends, city rankings/funnels, service-share drivers, and data verification."
+description: "Answer GrowthOS IRF questions: PFTU target/actual lookup and attainment rankings, coverage-based target shortlists, registration-contribution investigation of FTU target gaps, master reports, ratio investigations, monthly trends, city rankings/funnels, service-share drivers, and data verification."
 ---
 
 # GrowthOS IRF Analysis
@@ -46,6 +46,7 @@ Commands follow `.venv/bin/python -m growthos`. Use `<command> --help` for exact
 | Pooled New launch fallback comparison (separate from matched, ask first) | `target-analysis --month YYYY-MM --tier T1\|T2\|T3 --queue fallback`; first read [target-analysis.md](target-analysis.md) |
 | Target/actual lookup, cities above/at/below target, factual attainment ordering | `target-facts --month YYYY-MM [--city CITY ...]`; first read [target-analysis.md](target-analysis.md) |
 | Tier-specific target facts or cities covering a tier's own gap | Add `--tier T1\|T2\|T3` to the selected target tool; first read [target-analysis.md](target-analysis.md) |
+| Explain a same-month FTU target gap by registration volume (city, tier, group, national, month history) | `investigate --month YYYY-MM [--city CITY ...] [--tier T1\|T2\|T3] [--group "Label:City,City"] [--national] [--start YYYY-MM --end YYYY-MM]`; first read [target-analysis.md](target-analysis.md#registration-contribution-investigation) |
 | Cities also failing last month (shortfall widened >5pp) | Returned additively by either target tool; read `persistent_failure` and render a second table per [target-analysis.md](target-analysis.md) |
 
 For projected funnel columns or units, read [funnel-columns.md](funnel-columns.md).

@@ -16,9 +16,11 @@ from .analysis import (
 from .contracts import month_range, previous_month, validate_data
 from .errors import DiagnosticStage, MAX_OUTPUT_BYTES, SafeParser, diagnostic_stage, execute_cli, reject
 from .evidence import provenance
+from .investigation import investigate
 from .metrics import ALL_METRICS
 from .postgres import connect_reader
-from .selection import normalize_tier, validate_target_request
+from .selection import INVESTIGATION_MAX_BLOCKS, investigation_block_count, parse_investigation_group
+from .selection import normalize_tier, validate_investigation_request, validate_target_request
 from .selection import TARGET_ATTAINMENTS, TARGET_FACT_SORTS, validate_target_facts_request
 
 
@@ -29,7 +31,7 @@ def _add_period_args(command: argparse.ArgumentParser) -> None:
 
 TARGET_COMMANDS = ("target-analysis", "target-facts")
 PERIOD_COMMANDS = ("compare", "rank", "funnel", "share-drivers")
-COMMANDS = ("status", *PERIOD_COMMANDS, "verify", *TARGET_COMMANDS)
+COMMANDS = ("status", *PERIOD_COMMANDS, "verify", *TARGET_COMMANDS, "investigate")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -94,6 +96,15 @@ def parser() -> argparse.ArgumentParser:
     facts_cmd.add_argument("--offset", type=int, default=0, help="page offset after filtering and sorting")
     facts_cmd.add_argument("--limit", type=int, default=25, help="page size (1..100); follow next_offset for remaining facts")
     facts_cmd.add_argument("--tier", help="stored monthly tier T1/T2/T3; totals use assigned targets for its city cohort")
+
+    investigate_cmd = commands.add_parser("investigate", command_name="investigate")
+    investigate_cmd.add_argument("--month", required=True, help="explicit ended month, YYYY-MM")
+    investigate_cmd.add_argument("--city", action="append", default=[], help="repeatable city; each named city is one independent block")
+    investigate_cmd.add_argument("--group", action="append", default=[], help='explicit group as "Label:City,City"; never inferred')
+    investigate_cmd.add_argument("--tier", help="stored monthly tier T1/T2/T3 aggregate")
+    investigate_cmd.add_argument("--national", action="store_true", help="Grand Total target pair with observed actuals")
+    investigate_cmd.add_argument("--start", help="first history month YYYY-MM; requires --end")
+    investigate_cmd.add_argument("--end", help="last history month YYYY-MM; requires --start")
 
     return root
 
@@ -161,6 +172,16 @@ def load_target_context(store, period: str):
 
 
 def run(args) -> dict:
+    investigation = None
+    if args.command == "investigate":
+        with diagnostic_stage(DiagnosticStage.ARGUMENTS):
+            groups = [parse_investigation_group(item) for item in args.group]
+            tier = normalize_tier(args.tier)
+            months = validate_investigation_request(args.month, args.city, groups, args.start, args.end)
+            national = args.national or not (args.city or groups or tier)
+            if investigation_block_count(months, args.city, groups, tier, national) > INVESTIGATION_MAX_BLOCKS:
+                reject("BOUNDS", "Investigation exceeds the bounded block limit; narrow the months or selectors.")
+            investigation = {"months": months, "groups": groups, "tier": tier, "national": national}
     if args.command in TARGET_COMMANDS:
         with diagnostic_stage(DiagnosticStage.ARGUMENTS):
             normalize_tier(args.tier)
@@ -175,11 +196,28 @@ def run(args) -> dict:
                 with diagnostic_stage(DiagnosticStage.CATALOG):
                     return store.catalog(args.city_offset)
             with diagnostic_stage(DiagnosticStage.LOAD):
-                if args.command in TARGET_COMMANDS:
+                if args.command == "investigate":
+                    available = set(store.available_months())
+                    ftu_months = set(store.target_months("platform_ftu"))
+                    registrations_months = set(store.target_months("registrations"))
+                    loaded = [value for value in investigation["months"] if value in available]
+                    if not loaded:
+                        reject("COVERAGE", "None of the requested months have stored actuals; no substitute was selected.")
+                    dataset = store.load(loaded)
+                    targets = {value: store.load_targets(value) for value in loaded if value in ftu_months}
+                elif args.command in TARGET_COMMANDS:
                     dataset, targets, previous_targets = load_target_context(store, args.month)
                 else:
                     dataset = store.load(requested_months(args))
             with diagnostic_stage(DiagnosticStage.ANALYSIS):
+                if args.command == "investigate":
+                    return investigate(
+                        dataset, targets, requested_months=investigation["months"],
+                        available_months=available, ftu_months=ftu_months,
+                        registrations_months=registrations_months, cities=args.city,
+                        groups=investigation["groups"], tier=investigation["tier"],
+                        national=investigation["national"],
+                    )
                 if args.command == "target-analysis":
                     return target_cities(dataset, targets, args.month, mode=args.mode,
                                          offset=args.offset, limit=args.limit, tier=args.tier,

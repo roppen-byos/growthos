@@ -22,6 +22,7 @@ Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation a
    | Select cities whose material gaps cover the overall shortfall | `target-analysis --mode top` |
    | List every city meeting the agreed material target-miss rule | `target-analysis --mode all` |
    | Inspect the pooled New launch fallback comparison and its city breakdown | `target-analysis --queue fallback` |
+   | Explain a same-month FTU gap by registration volume | `investigate` |
 
    General facts have **no implicit 5% filter** or coverage stop. Plain “cities
    missing targets” retains the agreed >5% policy via target-analysis in all mode; an explicit
@@ -86,6 +87,57 @@ Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation a
    For all-city requests, deliver every selected row, in clearly labeled batches
    if needed. If delivery is incomplete, state returned/total counts and never
    describe it as the complete list. Do not save/export reports as a substitute.
+
+## Registration contribution investigation
+
+Use `investigate` when a **same-month Platform FTU target miss** needs the
+registration question answered. This is a target-accounting split, not causal
+evidence and not a month-on-month diagnosis.
+
+```bash
+growthos investigate --month 2026-10 --national
+growthos investigate --month 2026-10 --city Mumbai --city Delhi
+growthos investigate --month 2026-10 --tier T2
+growthos investigate --month 2026-10 --group "South:Trivandrum,Kochi,Chennai"
+growthos investigate --month 2026-10 --city Mumbai --start 2026-06 --end 2026-10
+```
+
+- Default with no selector is the national Grand Total block. Multiple named
+  cities are always separate blocks; nothing is summed unless a group or tier is
+  explicitly requested.
+- Arithmetic per scope: target ratio = FTU target / registration target; expected
+  FTU = registration actual × ratio; registration effect = FTU target − expected
+  FTU; contribution = registration effect / FTU gap. All decisions use exact
+  rational arithmetic; the floats are display only.
+- Verdicts: `registration_priority` only when contribution is strictly above 70%;
+  `other_factors_undetermined` at or below 70%; `no_registration_shortfall` when
+  the effect is zero or negative; `not_applicable` when the FTU gap is zero or
+  negative; `undetermined` with a specific reason when any operand is unavailable.
+  There is no additional registration-miss gate. Null is never treated as zero.
+- Always report the returned `verdict` for every scope and state the rule once:
+  strictly above 70% prioritises registration investigation, at or below 70% does
+  not. Put the verdict beside the contribution in the table. Never describe an
+  above-70% scope only as the "largest contributor", and never describe a
+  below-70% scope as "partly explained", without its verdict. Mark `over_explained`
+  scopes as partial offsets.
+- Contribution above 100% is retained with the `over_explained` flag and a
+  negative `unexplained_gap`; report it as partial offset, not as an error.
+- Tier contributions sum member effects and gaps and are unavailable unless every
+  member is calculable; `blocking_city_keys` names the members that block it.
+  Unplanned tier cities are excluded and covered only by the pooled New launch
+  block. Explicit groups behave the same way and never fall back to a subset.
+- The pooled New launch block compares the single stored pair against combined
+  observed actuals for both metrics; contribution is cohort-level only and a
+  `coverage_mismatch` flag discloses differing observed city sets.
+- National uses the supplied Grand Total pair with observed non-null actuals for
+  both metrics, reports each metric's coverage, and need not reconcile with summed
+  city effects.
+- `shortlist_eligible` mirrors the existing >5% shortlist rule and is `null` for
+  aggregate scopes. Investigation never changes selection.
+
+Wording: say what the registration shortfall accounts for. Never say registrations
+caused the gap, never call the remainder a conversion problem, and keep “target”
+rather than “plan” in new output.
 
 ## Interpretation
 
