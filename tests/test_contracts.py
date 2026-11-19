@@ -70,6 +70,16 @@ class ContractTests(unittest.TestCase):
         current = copy.deepcopy(self.raw)
         current["month_metadata"][0]["month"] = "2026-11"
         self.rejects("INCOMPLETE_MONTH", current)
+        boundary = copy.deepcopy(self.raw)
+        october = next(m for m in boundary["month_metadata"] if m["month"] == "2026-10")
+        october["extracted_at"] = "2026-10-31T10:30:00+00:00"
+        for read in october["source_reads"]:
+            read["started_at"] = "2026-10-31T10:00:00+00:00"
+            read["completed_at"] = "2026-10-31T10:15:00+00:00"
+        october["business_timezone"] = "Pacific/Kiritimati"
+        self.rejects("TIMEZONE", boundary)
+        october["business_timezone"] = "Asia/Kolkata"
+        self.rejects("INCOMPLETE_MONTH", boundary)
         changed = copy.deepcopy(self.raw)
         changed["month_metadata"][0]["extracted_at"] = "2026-11-03T00:01:00+00:00"
         changed["facts"][0]["tier"] = "T3"

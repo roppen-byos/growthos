@@ -633,11 +633,15 @@ _FUNNEL_SORT_FIELDS = {
 }
 
 
-def _resolve_funnel_sort_key(row: dict, sort_by: str) -> float | int | None:
+def _funnel_sort_field(sort_by: str) -> tuple[str, str, str]:
     normalized = sort_by.strip().lower().replace("_mom_abs", "_delta").replace("_mom_pct", "_growth")
     if normalized not in _FUNNEL_SORT_FIELDS:
         reject("ARGUMENTS", "Unsupported funnel sort key; run 'funnel --help' for reviewed keys. Input values withheld.")
-    group, metric, field = _FUNNEL_SORT_FIELDS[normalized]
+    return _FUNNEL_SORT_FIELDS[normalized]
+
+
+def _resolve_funnel_sort_key(row: dict, sort_field: tuple[str, str, str]) -> float | int | None:
+    group, metric, field = sort_field
     return getattr(row[group][metric], field)
 
 
@@ -679,6 +683,7 @@ def city_funnels(
     tier_filter = normalize_tier(tier)
     comparison = prepare_comparison(dataset, previous, latest, tier_filter=tier_filter, cities=cities)
     prev, curr, pairs = comparison.previous, comparison.latest, comparison.pairs
+    sort_field = _funnel_sort_field(sort_by)
 
     built = []
     for meta, prev_row, curr_row in pairs:
@@ -688,7 +693,7 @@ def city_funnels(
             "city_key": key, "city": meta["city"], "tier": meta["tier"],
             "source_cities": meta["source_cities"], "volumes": volumes, "ratios": ratios,
         }
-        val = _resolve_funnel_sort_key(item, sort_by)
+        val = _resolve_funnel_sort_key(item, sort_field)
         built.append((val is None, (val if ascending else -(val or 0)) if val is not None else 0, key, item))
 
     built.sort(key=lambda x: (x[0], x[1], x[2]))

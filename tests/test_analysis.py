@@ -299,6 +299,10 @@ class AnalysisTests(unittest.TestCase):
         for sort in ("unknown", "city", "i2r_mom_pct"):
             with self.subTest(sort=sort), self.assertRaises(GrowthOSError):
                 city_funnels(dataset, sort_by=sort)
+        for tier in (None, "T2"):
+            with self.subTest(tier=tier), self.assertRaises(GrowthOSError):
+                city_funnels(dataset, tier=tier, sort_by="unknown")
+        self.assertEqual(city_funnels(dataset, tier="T2")["row_count"], 0)
 
     def test_funnel_null_sort_values_stay_last_and_project_as_unavailable(self):
         raw = demo_payload()

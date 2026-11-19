@@ -8,7 +8,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from .errors import reject
 
@@ -25,6 +25,7 @@ RATIOS = {
 }
 TIERS = ("T1", "T2", "T3")
 SOURCES = ("installs", "registrations", "ftu")
+BUSINESS_TIMEZONE = "Asia/Kolkata"
 # Per fetch/read, not database retention limits.
 MAX_FACTS = 20_000
 MAX_MONTHS = 12
@@ -137,12 +138,9 @@ def validate_metadata(raw: object, *, now: datetime | None = None) -> None:
     extracted = timestamp(raw["extracted_at"])
     if extracted > (now or datetime.now(timezone.utc)):
         reject("TIMESTAMP", "Extraction time must not be in the future.")
-    if not isinstance(raw["business_timezone"], str) or len(raw["business_timezone"]) > 80:
-        reject("TIMEZONE", "An explicit business timezone is required.")
-    try:
-        zone = ZoneInfo(raw["business_timezone"])
-    except (ZoneInfoNotFoundError, ValueError):
-        reject("TIMEZONE", "An explicit business timezone is required.")
+    if raw["business_timezone"] != BUSINESS_TIMEZONE:
+        reject("TIMEZONE", f"Business timezone must be {BUSINESS_TIMEZONE}.")
+    zone = ZoneInfo(BUSINESS_TIMEZONE)
     if value >= extracted.astimezone(zone).date().replace(day=1):
         reject("INCOMPLETE_MONTH", "Only ended calendar months may be fetched or reported.")
     reads = raw["source_reads"]

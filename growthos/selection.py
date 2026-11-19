@@ -6,11 +6,10 @@ from fractions import Fraction
 from zoneinfo import ZoneInfo
 
 from .classification import normalize_city_key
-from .contracts import TIERS, MonthlyData, month, month_range, next_month
+from .contracts import BUSINESS_TIMEZONE, TIERS, MonthlyData, month, month_range, next_month
 from .errors import reject
 
 
-BUSINESS_TIMEZONE = "Asia/Kolkata"
 CityPair = tuple[dict, dict | None, dict | None]
 
 
