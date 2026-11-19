@@ -151,6 +151,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(targets["target_shortfall"]["formula"], "target - actual")
         self.assertIn("5%", targets["target_shortlist"]["eligibility"])
         self.assertIn("5 percentage points", targets["target_persistence"]["comparison"])
+        self.assertIn("new_miss", targets["target_persistence"]["statuses"])
 
         defs = definitions()
         for key in (*ALL_METRICS, "absolute_delta", "growth_fraction", "delta_pp", "link_vs_auto_share_gap", "glossary_distinctions", "rules"):

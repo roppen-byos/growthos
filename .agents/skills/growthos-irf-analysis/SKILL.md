@@ -49,7 +49,7 @@ Commands follow `.venv/bin/python -m growthos`. Use `<command> --help` for exact
 | Target/actual lookup, cities above/at/below target, factual attainment ordering | `target-facts --month YYYY-MM [--city CITY ...]`; first read [target-analysis.md](target-analysis.md) |
 | Tier-specific target facts or cities covering a tier's own gap | Add `--tier T1\|T2\|T3` to the selected target tool; first read [target-analysis.md](target-analysis.md) |
 | Explain a same-month FTU target gap by registration volume (city, tier, group, national, month history) | `investigate --month YYYY-MM [--city CITY ...] [--tier T1\|T2\|T3] [--group "Label:City,City"] [--national] [--start YYYY-MM --end YYYY-MM]`; first read [target-analysis.md](target-analysis.md#registration-contribution-investigation) |
-| Cities also failing last month (shortfall widened >5pp) | Returned additively by either target tool; read `persistent_failure` and render a second table per [target-analysis.md](target-analysis.md) |
+| Cities whose target miss widened >5pp last month (persistent or new) | Returned additively by either target tool; read `persistent_failure`, check `status`, and render a second table per [target-analysis.md](target-analysis.md) |
 
 For projected funnel columns or units, read [funnel-columns.md](funnel-columns.md).
 

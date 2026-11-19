@@ -51,8 +51,9 @@ class TargetPersistenceTests(unittest.TestCase):
         self.assertTrue(persistence["available"])
         self.assertEqual(persistence["previous_month"], "2026-09")
         self.assertEqual((persistence["city_count"], persistence["checked_city_count"]), (1, 1))
+        self.assertEqual((persistence["persistent_city_count"], persistence["new_miss_city_count"]), (1, 0))
         row = persistence["rows"][0]
-        self.assertEqual((row["city"], row["failing_since"]), ("Alpha", "2026-09"))
+        self.assertEqual((row["city"], row["status"], row["failing_since"]), ("Alpha", "persistent", "2026-09"))
         self.assertAlmostEqual(row["current_shortfall_pct"], 40.0)
         self.assertAlmostEqual(row["previous_shortfall_pct"], 20.0)
         self.assertAlmostEqual(row["shortfall_pct_delta"], 20.0)
@@ -68,14 +69,27 @@ class TargetPersistenceTests(unittest.TestCase):
         self.assertEqual(persistence["city_count"], 0)
         self.assertEqual(persistence["excluded_city_counts"]["shortfall_pct_delta_not_above_5"], 1)
 
-    def test_prior_exactly_five_percent_is_not_a_prior_miss(self):
+    def test_prior_exactly_five_percent_is_labelled_new_miss(self):
         data, sep, oct_ = self.build(
             [("2026-09", "Alpha", "T1", 95), ("2026-10", "Alpha", "T1", 60)],
             [("Alpha", 100)], [("Alpha", 100)])
         persistence = target_cities(
             data, oct_, "2026-10", mode="all", previous_targets=sep)["persistent_failure"]
-        self.assertEqual(persistence["city_count"], 0)
-        self.assertEqual(persistence["excluded_city_counts"]["prior_not_above_5_percent"], 1)
+        self.assertEqual(persistence["city_count"], 1)
+        self.assertEqual((persistence["persistent_city_count"], persistence["new_miss_city_count"]), (0, 1))
+        self.assertEqual(persistence["rows"][0]["status"], "new_miss")
+        self.assertEqual(persistence["rows"][0]["failing_since"], "2026-10")
+        self.assertNotIn("prior_not_above_5_percent", persistence["excluded_city_counts"])
+
+    def test_prior_overshoot_is_labelled_new_miss(self):
+        data, sep, oct_ = self.build(
+            [("2026-09", "Alpha", "T1", 120), ("2026-10", "Alpha", "T1", 60)],
+            [("Alpha", 100)], [("Alpha", 100)])
+        persistence = target_cities(
+            data, oct_, "2026-10", mode="all", previous_targets=sep)["persistent_failure"]
+        self.assertEqual(persistence["rows"][0]["status"], "new_miss")
+        self.assertAlmostEqual(persistence["rows"][0]["previous_shortfall_pct"], -20.0)
+        self.assertTrue(any("not a material miss in 2026-09" in w for w in persistence["warnings"]))
 
     def test_improving_but_still_failing_city_is_not_listed(self):
         data, sep, oct_ = self.build(

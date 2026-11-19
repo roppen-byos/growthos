@@ -69,9 +69,12 @@ Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation a
    `fallback.skipped_null_city_count` and `fallback.qualifies` beside the plan-matched
    result, and ask before listing the actual-only fallback breakdown.
    When `persistent_failure.available` is true, render its `rows` as a second
-   table headed “Also failing in <previous_month> — shortfall widened >5pp”, with
-   city, current shortfall %, previous shortfall %, change in pp and
-   `failing_since`. Report `city_count` and `undetermined_city_count` beside it.
+   table headed “Widening target misses vs <previous_month> (>5pp)”, with
+   city, `status`, current shortfall %, previous shortfall %, change in pp and
+   `failing_since`. Report `city_count`, `persistent_city_count`,
+   `new_miss_city_count` and `undetermined_city_count` beside it. `persistent`
+   means the prior month was also a >5% miss; `new_miss` means it was not. Never
+   describe the table as only persistent misses.
    This is additive: never replace, reorder or filter the main shortlist because
    of it. If `available` is false, state the returned reason and do not show the
    table; if `city_count` is zero, say no returned city also widened by >5pp.
@@ -189,16 +192,19 @@ rather than “plan” in new output.
   launch, an allocation or a shared per-city budget. Explicit missing/zero plan
   targets do not join the pool.
 - The additive `persistent_failure` object lists currently returned material misses
-  that were also strictly >5% below their own positive explicit city target in the
-  immediately previous calendar month and whose shortfall percentage widened by
-  more than 5 percentage points. It uses exact integer arithmetic before display
-  rounding. A city failing both months but improving is not listed. Missing prior
-  city/target/actual and nonpositive prior targets are undetermined, not failures.
-  Only the returned page is annotated; above/at/unavailable facts and pooled
-  fallback cities never appear. With `--tier`, the selected month's stored tier is
-  the only tier source; prior-month tier need not match. If no prior month has both
-  targets and actuals, `available` is false with an explicit reason. Never describe
-  the list as every persistent miss.
+  whose shortfall percentage widened by more than 5 percentage points against the
+  immediately previous calendar month, using exact integer arithmetic before display
+  rounding. The prior month must have an explicit positive city target and actual;
+  its own shortfall sets the row's `status` but does not filter the row:
+  `persistent` when the prior shortfall was also strictly >5%, otherwise `new_miss`.
+  `failing_since` is the prior month for persistent rows and the selected month for
+  new misses. A city that missed both months but improved is not listed. Missing
+  prior city/target/actual and nonpositive prior targets are undetermined, not
+  failures. Only the returned page is annotated; above/at/unavailable facts and
+  pooled fallback cities never appear. With `--tier`, the selected month's stored
+  tier is the only tier source; prior-month tier need not match. If no prior month
+  has both targets and actuals, `available` is false with an explicit reason. Never
+  describe the list as only persistent misses.
 - Attingal target + Trivandrum target is the canonical Trivandrum target; actuals
   already use that city. Ludhiana uses the source's T2 target row while its actual
   tier remains unchanged. Use returned evidence rather than redoing these joins.

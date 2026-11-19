@@ -33,8 +33,9 @@ SERVICE_MAP = {
 
 
 PERSISTENCE_CRITERIA = (
-    "current and previous month each strictly >5% below their own positive city target, "
-    "and current_shortfall_pct - previous_shortfall_pct > 5 percentage points"
+    "current shortfall strictly >5% of the city's own positive target, an evaluable prior month, "
+    "and current_shortfall_pct - previous_shortfall_pct > 5 percentage points; "
+    "status is persistent when the prior shortfall was also strictly >5%, otherwise new_miss"
 )
 
 
@@ -196,28 +197,29 @@ def _persistent_failure(
     page_rows: list[dict], dataset: MonthlyData, previous_targets: TargetMonth | None,
     period: str, *, tier: str | None = None, queue: str = "matched",
 ) -> dict:
-    """Annotate a page with cities whose material miss also widened against the prior month."""
+    """Annotate a page with material misses whose shortfall widened against the prior month."""
     prior = previous_month(period)
     excluded = {
         "missing_prior_city_observation": 0, "missing_prior_target": 0,
         "nonpositive_prior_target": 0, "missing_prior_actual": 0,
-        "prior_not_above_5_percent": 0, "shortfall_pct_delta_not_above_5": 0,
+        "shortfall_pct_delta_not_above_5": 0,
     }
     result = {
         "available": False, "previous_month": prior, "criteria": PERSISTENCE_CRITERIA,
         "rows": [], "page_city_count": len(page_rows), "checked_city_count": 0,
         "not_currently_qualifying_city_count": 0, "city_count": 0,
+        "persistent_city_count": 0, "new_miss_city_count": 0,
         "undetermined_city_count": 0, "excluded_city_counts": excluded, "warnings": [],
     }
     if queue == "fallback":
         result["reason"] = "pooled_fallback_has_no_city_targets"
         result["warnings"].append(
-            "Pooled New launch fallback cities have no individual target, so no per-city persistence table is available.")
+            "Pooled New launch fallback cities have no individual target, so no per-city prior-month comparison is available.")
         return result
     if previous_targets is None:
         result["reason"] = "no_previous_month_with_targets_and_actuals"
         result["warnings"].append(
-            "No preceding stored month has both Platform FTU actuals and targets, so prior-month persistence cannot be evaluated.")
+            "No preceding stored month has both Platform FTU actuals and targets, so the prior-month comparison cannot be evaluated.")
         return result
     if previous_targets.data["month"] != prior:
         reject("COVERAGE", "Prior targets must describe the immediately previous calendar month.")
@@ -225,7 +227,7 @@ def _persistent_failure(
     if prior not in data["months"]:
         result["reason"] = "no_previous_month_with_targets_and_actuals"
         result["warnings"].append(
-            "The prior month's actuals were not read with this request, so persistence cannot be evaluated.")
+            "The prior month's actuals were not read with this request, so the prior-month comparison cannot be evaluated.")
         return result
     prior_facts = {r["city_key"]: r for r in data["facts"] if r["month"] == prior}
     prior_explicit = {r["city_key"]: r for r in previous_targets.data["rows"] if r["kind"] == "city"}
@@ -250,35 +252,42 @@ def _persistent_failure(
             reason = "missing_prior_actual"
         else:
             prior_shortfall = prior_target - fact["platform_ftu"]
-            if 20 * prior_shortfall <= prior_target:
-                reason = "prior_not_above_5_percent"
-            elif 20 * current_shortfall * prior_target - 20 * prior_shortfall * target <= target * prior_target:
+            if 20 * current_shortfall * prior_target - 20 * prior_shortfall * target <= target * prior_target:
                 reason = "shortfall_pct_delta_not_above_5"
             else:
                 reason = None
         if reason is None:
             current_pct = 100 * current_shortfall / target
             prior_pct = 100 * prior_shortfall / prior_target
+            persistent = 20 * prior_shortfall > prior_target
             rows.append({
-                "city_key": key, "city": row["city"],
+                "city_key": key, "city": row["city"], "status": "persistent" if persistent else "new_miss",
                 "current_shortfall_pct": current_pct,
                 "previous_shortfall_pct": prior_pct,
                 "shortfall_pct_delta": current_pct - prior_pct,
-                "failing_since": prior,
+                "failing_since": prior if persistent else period,
             })
         else:
             excluded[reason] += 1
     undetermined = sum(excluded[k] for k in (
         "missing_prior_city_observation", "missing_prior_target",
         "nonpositive_prior_target", "missing_prior_actual"))
+    persistent_count = sum(r["status"] == "persistent" for r in rows)
     result.update({
         "available": True, "rows": rows, "checked_city_count": checked,
         "not_currently_qualifying_city_count": len(page_rows) - checked,
-        "city_count": len(rows), "undetermined_city_count": undetermined,
+        "city_count": len(rows), "persistent_city_count": persistent_count,
+        "new_miss_city_count": len(rows) - persistent_count,
+        "undetermined_city_count": undetermined,
     })
     result["warnings"].append(
-        "Persistence requires the shortfall percentage to widen by more than 5 percentage points; "
-        "a city that missed both months but improved is not listed.")
+        "Listed rows are material current misses whose shortfall percentage widened by more than "
+        "5 percentage points; status marks prior-month persistence. A city that missed both months "
+        "but improved is not listed.")
+    if result["new_miss_city_count"]:
+        result["warnings"].append(
+            f"{result['new_miss_city_count']} listed cities were not a material miss in {prior}; "
+            "this is a widening-miss table, not only persistent misses.")
     if undetermined:
         result["warnings"].append(
             f"{undetermined} returned cities could not be compared with {prior} because an explicit prior target or actual was unavailable.")

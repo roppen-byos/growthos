@@ -247,7 +247,8 @@ class CliTests(unittest.TestCase):
                     self.assertEqual(persistence["previous_month"], "2026-09")
                     self.assertEqual(persistence["city_count"], 1)
                     self.assertEqual(persistence["rows"][0]["city"], "Alpha")
-                    self.assertEqual(persistence["rows"][0]["failing_since"], "2026-09")
+                    self.assertEqual((persistence["rows"][0]["status"], persistence["rows"][0]["failing_since"]),
+                                     ("persistent", "2026-09"))
 
     def test_target_error_is_sanitized_and_missing_install_does_not_disable_existing_commands(self):
         with patch("fixtures.FixtureReaderStore.load_targets", side_effect=GrowthOSError(

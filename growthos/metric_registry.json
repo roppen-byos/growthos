@@ -296,13 +296,14 @@
     },
     "target_persistence": {
       "id": "target_persistence",
-      "label": "Persistent Target Miss (Widening Shortfall)",
-      "definition": "Annotation of a currently returned material target miss whose gap also widened against the immediately previous stored month.",
-      "eligibility": "A currently returned plan-matched city must be strictly more than 5% below its own positive target in the selected month and also strictly more than 5% below its own positive explicit city target in the immediately previous calendar month.",
+      "label": "Target Miss Widening Against Prior Month",
+      "definition": "Annotation of a currently returned material target miss whose shortfall percentage also widened against the immediately previous stored month. Each row is labelled persistent or new_miss.",
+      "eligibility": "A currently returned plan-matched city must be strictly more than 5% below its own positive target in the selected month, and the immediately previous calendar month must have an explicit positive city target and a non-null actual. The same 5% rule labels the row; a prior-month material miss is not required.",
       "comparison": "Listed only when current shortfall percentage minus previous shortfall percentage is strictly greater than 5 percentage points, evaluated with exact integer arithmetic before display rounding.",
+      "statuses": "persistent when the prior shortfall was also strictly more than 5% of its positive target, otherwise new_miss. failing_since is the previous month for persistent rows and the selected month for new_miss rows.",
       "scope": "Only currently returned page cities with an explicit plan city target are checked; pooled New launch fallback cities have no individual target and are never annotated.",
       "tier_scope": "The selected month's stored tier is the only tier source; the prior month's tier is not required to match.",
-      "limits": "A city that missed both months but improved is not listed. Absence is not evidence that a city met earlier targets or that the prior month was complete."
+      "limits": "A city that missed both months but improved is not listed. The list is not only persistent misses: new_miss rows were not a material miss in the prior month. Absence is not evidence that a city met earlier targets or that the prior month was complete."
     }
   },
   "warehouse_queries": {

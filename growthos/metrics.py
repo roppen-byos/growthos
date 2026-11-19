@@ -316,7 +316,7 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
             reject("SCHEMA", "Invalid target shortlist rule in metric registry.")
 
     persistence = targets["target_persistence"]
-    for field in ("eligibility", "comparison", "scope", "tier_scope", "limits"):
+    for field in ("eligibility", "comparison", "statuses", "scope", "tier_scope", "limits"):
         if not _long_text(persistence.get(field)):
             reject("SCHEMA", "Invalid target persistence rule in metric registry.")
 
