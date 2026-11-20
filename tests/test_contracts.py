@@ -2,7 +2,7 @@ import copy
 import unittest
 from datetime import datetime, timezone
 
-from growthos.contracts import MAX_FACTS, RATIOS, VOLUMES, month_range, reporting_schema_sql, validate_data
+from growthos.contracts import MAX_FACTS, RATIOS, VOLUMES, funnel_metrics_sql, month_range, reporting_schema_sql, validate_data
 from growthos.classification import EXPLICIT_MERGES, MERGED_SOURCE_CITIES, normalize_city_key, resolve_city
 from growthos.errors import GrowthOSError
 from growthos.metrics import ALL_METRICS, _load_metric_registry, definitions, metric_registry
@@ -70,6 +70,16 @@ class ContractTests(unittest.TestCase):
         current = copy.deepcopy(self.raw)
         current["month_metadata"][0]["month"] = "2026-11"
         self.rejects("INCOMPLETE_MONTH", current)
+        boundary = copy.deepcopy(self.raw)
+        october = next(m for m in boundary["month_metadata"] if m["month"] == "2026-10")
+        october["extracted_at"] = "2026-10-31T10:30:00+00:00"
+        for read in october["source_reads"]:
+            read["started_at"] = "2026-10-31T10:00:00+00:00"
+            read["completed_at"] = "2026-10-31T10:15:00+00:00"
+        october["business_timezone"] = "Pacific/Kiritimati"
+        self.rejects("TIMEZONE", boundary)
+        october["business_timezone"] = "Asia/Kolkata"
+        self.rejects("INCOMPLETE_MONTH", boundary)
         changed = copy.deepcopy(self.raw)
         changed["month_metadata"][0]["extracted_at"] = "2026-11-03T00:01:00+00:00"
         changed["facts"][0]["tier"] = "T3"
@@ -111,12 +121,17 @@ class ContractTests(unittest.TestCase):
         self.assertIn("CREATE TABLE irf.month_metadata", sql)
         self.assertIn("CREATE TABLE irf.facts", sql)
         self.assertIn("tier IN ('T1','T2','T3')", sql)
+        for metric in ("fe_sessions", "rr", "net", "bike_rr", "bike_net", "auto_rr", "auto_net", "cab_rr", "cab_net"):
+            self.assertIn(metric, sql)
+        migration = funnel_metrics_sql()
+        self.assertIn("ADD COLUMN IF NOT EXISTS fe_sessions", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS bike_net", migration)
 
     def test_metric_registry_contract_shape_and_tamper_rejection(self):
         import json
 
         store = metric_registry()
-        self.assertEqual(set(store), {"metrics", "movements", "targets", "glossary_distinctions", "rules"})
+        self.assertEqual(set(store), {"metrics", "movements", "targets", "warehouse_queries", "glossary_distinctions", "rules"})
         self.assertNotIn("version", store)
         self.assertNotIn("schema_version", store)
         self.assertEqual(tuple(store["metrics"]), ALL_METRICS)
@@ -124,6 +139,10 @@ class ContractTests(unittest.TestCase):
             entry = store["metrics"][m]
             self.assertEqual(entry["unit"], "count")
             self.assertEqual(entry["subject_unit"], "installations" if m == "installs" else "customers")
+        for m in ("fe_sessions", "rr", "bike_rr", "auto_rr", "cab_rr"):
+            self.assertEqual(store["metrics"][m]["subject_unit"], "sessions")
+        for m in ("net", "bike_net", "auto_net", "cab_net"):
+            self.assertEqual(store["metrics"][m]["subject_unit"], "rides")
         for m, (num_col, den_col) in RATIOS.items():
             entry = store["metrics"][m]
             self.assertEqual(entry["unit"], "fraction")
@@ -131,14 +150,21 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(entry["movement_unit"], "percentage_points")
             self.assertEqual((entry["numerator"], entry["denominator"]), (num_col, den_col))
         self.assertEqual(store["metrics"]["platform_link_ftu"]["service_membership"], ["Link"])
+        self.assertIn("Bike Rated by Women", store["metrics"]["bike_net"]["service_membership"])
+        self.assertIn("Demand metric", store["metrics"]["fe2rr"]["definition"])
+        self.assertIn("Fulfillment metric", store["metrics"]["rr2net"]["definition"])
 
         targets = store["targets"]
         self.assertEqual(set(targets), {
-            "platform_ftu_target", "target_shortfall", "shortfall_percentage", "target_shortlist"})
+            "platform_ftu_target", "target_variance", "variance_percentage", "target_shortlist",
+            "target_persistence"})
         self.assertEqual(set(targets["platform_ftu_target"]["components"]), {
             "grand_total", "city_target", "new_launch_fallback"})
-        self.assertEqual(targets["target_shortfall"]["formula"], "target - actual")
+        self.assertEqual(targets["target_variance"]["formula"], "actual - target")
+        self.assertEqual(targets["variance_percentage"]["formula"], "100 * (actual - target) / target")
         self.assertIn("5%", targets["target_shortlist"]["eligibility"])
+        self.assertIn("-5 percentage points", targets["target_persistence"]["comparison"])
+        self.assertIn("new_miss", targets["target_persistence"]["statuses"])
 
         defs = definitions()
         for key in (*ALL_METRICS, "absolute_delta", "growth_fraction", "delta_pp", "link_vs_auto_share_gap", "glossary_distinctions", "rules"):
@@ -147,7 +173,8 @@ class ContractTests(unittest.TestCase):
             self.assertNotIn("decision_refs", entry)
             self.assertNotIn("decision_refs", defs[metric_id])
         self.assertFalse(defs["glossary_distinctions"]["svn"]["supported_in_v1"])
-        self.assertFalse(defs["glossary_distinctions"]["rr2net"]["supported_in_v1"])
+        self.assertFalse(defs["glossary_distinctions"]["ao"]["supported_in_v1"])
+        self.assertNotIn("rr2net", defs["glossary_distinctions"])
 
         bad_versioned = copy.deepcopy(store)
         bad_versioned["version"] = "1.0.0"
@@ -155,10 +182,12 @@ class ContractTests(unittest.TestCase):
             _load_metric_registry(json.dumps(bad_versioned))
         self.assertEqual(caught.exception.code, "SCHEMA")
 
-        bad_alias = copy.deepcopy(store)
-        bad_alias["metrics"]["platform_auto_ftu"]["aliases"].append("SVN")
-        with self.assertRaises(GrowthOSError):
-            _load_metric_registry(json.dumps(bad_alias))
+        for forbidden_alias in ("SVN", "AO"):
+            bad_alias = copy.deepcopy(store)
+            bad_alias["metrics"]["platform_auto_ftu"]["aliases"].append(forbidden_alias)
+            with self.assertRaises(GrowthOSError) as caught:
+                _load_metric_registry(json.dumps(bad_alias))
+            self.assertEqual(caught.exception.code, "SCHEMA")
 
         bad_ratio = copy.deepcopy(store)
         bad_ratio["metrics"]["r2n"]["denominator"] = "installs"

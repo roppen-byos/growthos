@@ -13,6 +13,45 @@ MISSING_TOTALS_WARNING = "Missing city observations or operands prevent complete
 TIER_RECLASSIFIED_WARNING = "City tier assignments changed across compared months; cohorts use each city's latest observed tier in the pair."
 TARGET_OPERANDS_WARNING = "Some target or actual operands are unavailable; cities with missing operands cannot qualify. Overall recorded FTU excludes null city FTU values."
 TARGET_FACT_OPERANDS_WARNING = "Some target or actual operands are unavailable; missing city observations remain visible in facts. Overall recorded FTU excludes null city FTU values."
+OVER_EXPLAINED_WARNING = (
+    "Some scopes have a registration effect larger than the FTU miss (over 100 percent); "
+    "better-than-target FTU relative to registrations partly offsets the miss and the remainder is positive."
+)
+NATIONAL_COVERAGE_WARNING = (
+    "National diagnosis uses the supplied Grand Total target pair with observed non-null actuals for both "
+    "metrics; observed FTU and registration city coverage can differ and need not reconcile with summed city effects."
+)
+POOLED_WARNING = (
+    "Unplanned cities share one New launch target pair compared with their combined observed actuals; "
+    "the pooled target is not an allocation, per-city target, shared budget or launch evidence."
+)
+TIER_EXCLUDED_WARNING = (
+    "Tier contribution uses only cities with an explicit target whose stored tier matches the selected month; "
+    "unplanned tier cities are excluded from the aggregate and are covered only by the separate pooled New launch block."
+)
+INVESTIGATION_UNDETERMINED_WARNING = (
+    "Unavailable operands make some scopes undetermined; null targets and null actuals are never treated as zero."
+)
+FUNNEL_PROXY_WARNING = (
+    "FE sessions, RR and Net in irf.facts cover all customers (not an FTU-eligible-only cohort); "
+    "stage contributions apply city-wide relative changes to scaled Platform FTU as a proxy signal, "
+    "are evaluated independently and must not be summed."
+)
+FUNNEL_CALENDAR_SCALING_WARNING = (
+    "Volume counts for the longer month in a MoM pair are proportionally scaled to the shorter month's calendar length "
+    "(average daily run-rate adjustment, not literal removal of the extra calendar day); conversion rates are unaffected."
+)
+FUNNEL_OVER_EXPLAINED_WARNING = (
+    "Some funnel stages show an isolated counterfactual effect larger than the calendar-adjusted MoM FTU dip (over 100 percent); "
+    "other factors partly offset the dip. Primary stage contributions are non-additive."
+)
+FUNNEL_NATIONAL_MATCHED_WARNING = (
+    "National funnel diagnosis rolls up matched cities observed in both months per stage/metric so newly observed cities "
+    "do not distort MoM movement; excluded cities are disclosed in coverage."
+)
+FUNNEL_UNDETERMINED_WARNING = (
+    "Unavailable or nonpositive operands make some scopes or stages undetermined; null counts are never treated as zero."
+)
 CITY_PAGE_SIZE = 25
 
 
@@ -82,5 +121,5 @@ def catalog(dataset: MonthlyData, city_offset: int = 0) -> dict:
     del result["fact_count"]
     return {
         **result, **provenance(dataset),
-        "supported_operations": ["status", "compare", "rank", "funnel", "share-drivers", "verify", "target-analysis", "target-facts"],
+        "supported_operations": ["status", "compare", "rank", "funnel", "share-drivers", "warehouse-queries", "verify", "target-analysis", "target-facts", "investigate", "investigate-funnel"],
     }

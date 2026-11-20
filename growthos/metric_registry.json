@@ -109,6 +109,230 @@
         "Excludes c2c, while unselected services still count in independent Platform FTU when platform-new."
       ]
     },
+    "fe_sessions": {
+      "id": "fe_sessions",
+      "label": "Fare Estimate Sessions",
+      "aliases": [
+        "FE",
+        "FE Sessions",
+        "Fare Estimate"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "sessions",
+      "display_unit": "sessions",
+      "movement_unit": "sessions",
+      "definition": "Fare estimate (FE): when the pickup and drop locations are punched in and prices of all service categories are shown. Stored as the monthly city sum of daily customer maximum unique FE sessions across all customers.",
+      "caveats": [
+        "Counts all-customer FE sessions (not distinct FE users and not an FTU-eligible-only cohort).",
+        "Historical months before funnel backfill may have null city rows; nulls remain unavailable, never zero."
+      ]
+    },
+    "rr": {
+      "id": "rr",
+      "label": "Rapido Requests",
+      "aliases": [
+        "RR",
+        "Request Rapido",
+        "RR Sessions"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "sessions",
+      "display_unit": "sessions",
+      "movement_unit": "sessions",
+      "definition": "Request Rapido (RR): selecting a service and requesting a ride. Stored as the monthly city sum of daily unique request sessions across all customers and RF service rows.",
+      "caveats": [
+        "Covers all customers across all RF service rows (including services outside Bike, Auto, and Cab).",
+        "Historical months before funnel backfill may have null city rows; nulls remain unavailable, never zero."
+      ]
+    },
+    "net": {
+      "id": "net",
+      "label": "Net Rides",
+      "aliases": [
+        "Net",
+        "Dropped Orders",
+        "Net Rides"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "rides",
+      "display_unit": "rides",
+      "movement_unit": "rides",
+      "definition": "Completed (dropped) orders across all customers and RF service rows in the reporting period.",
+      "caveats": [
+        "Counts all-customer completed rides, distinct from Platform FTU (first-ever ride customers).",
+        "Covers all RF service rows (including services outside Bike, Auto, and Cab)."
+      ]
+    },
+    "bike_rr": {
+      "id": "bike_rr",
+      "label": "Bike RR",
+      "aliases": [
+        "Bike Rapido Requests"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "sessions",
+      "display_unit": "sessions",
+      "movement_unit": "sessions",
+      "service_membership": [
+        "Link",
+        "Bike Pink",
+        "Bike Metro",
+        "Scooty",
+        "Bike Rated by Women",
+        "Bike Lite"
+      ],
+      "definition": "Monthly city sum of daily unique Rapido Request (RR) sessions across the approved Bike service family for all customers.",
+      "caveats": [
+        "Covers all customers across the six approved Bike service aliases including Bike Rated by Women and Bike Lite."
+      ]
+    },
+    "bike_net": {
+      "id": "bike_net",
+      "label": "Bike Net Rides",
+      "aliases": [
+        "Bike Net",
+        "Bike Dropped Orders"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "rides",
+      "display_unit": "rides",
+      "movement_unit": "rides",
+      "service_membership": [
+        "Link",
+        "Bike Pink",
+        "Bike Metro",
+        "Scooty",
+        "Bike Rated by Women",
+        "Bike Lite"
+      ],
+      "definition": "Monthly city sum of completed (dropped) orders across the approved Bike service family for all customers.",
+      "caveats": [
+        "Covers all customers across the six approved Bike service aliases including Bike Rated by Women and Bike Lite."
+      ]
+    },
+    "auto_rr": {
+      "id": "auto_rr",
+      "label": "Auto RR",
+      "aliases": [
+        "Auto Rapido Requests"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "sessions",
+      "display_unit": "sessions",
+      "movement_unit": "sessions",
+      "service_membership": [
+        "Auto",
+        "Auto Lite",
+        "Auto Pet",
+        "Auto Pool",
+        "Auto Priority",
+        "AutoPremium"
+      ],
+      "definition": "Monthly city sum of daily unique Rapido Request (RR) sessions across the approved Auto service family for all customers.",
+      "caveats": [
+        "Covers all customers across the approved Auto service variants."
+      ]
+    },
+    "auto_net": {
+      "id": "auto_net",
+      "label": "Auto Net Rides",
+      "aliases": [
+        "Auto Net",
+        "Auto Dropped Orders"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "rides",
+      "display_unit": "rides",
+      "movement_unit": "rides",
+      "service_membership": [
+        "Auto",
+        "Auto Lite",
+        "Auto Pet",
+        "Auto Pool",
+        "Auto Priority",
+        "AutoPremium"
+      ],
+      "definition": "Monthly city sum of completed (dropped) orders across the approved Auto service family for all customers.",
+      "caveats": [
+        "Covers all customers across the approved Auto service variants."
+      ]
+    },
+    "cab_rr": {
+      "id": "cab_rr",
+      "label": "Cab RR",
+      "aliases": [
+        "Cab Rapido Requests"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "sessions",
+      "display_unit": "sessions",
+      "movement_unit": "sessions",
+      "service_membership": [
+        "CabEconomy",
+        "CabPremium",
+        "Cab Premium - Intercity",
+        "Cab AC - Airport",
+        "Cab AC Sedan - Airport",
+        "Cab SUV",
+        "Cab Premium - Airport",
+        "Cab AC Sedan",
+        "Cab Daily",
+        "Cab Economy - Intercity",
+        "CabAC",
+        "Cab Priority",
+        "Cab SUV - Airport",
+        "Cab SUV - Intercity",
+        "Cab Economy - Airport",
+        "Cab Premium Biz"
+      ],
+      "definition": "Monthly city sum of daily unique Rapido Request (RR) sessions across the approved Cab service family for all customers.",
+      "caveats": [
+        "Covers all customers across the approved Cab service variants and excludes c2c."
+      ]
+    },
+    "cab_net": {
+      "id": "cab_net",
+      "label": "Cab Net Rides",
+      "aliases": [
+        "Cab Net",
+        "Cab Dropped Orders"
+      ],
+      "kind": "volume",
+      "unit": "count",
+      "subject_unit": "rides",
+      "display_unit": "rides",
+      "movement_unit": "rides",
+      "service_membership": [
+        "CabEconomy",
+        "CabPremium",
+        "Cab Premium - Intercity",
+        "Cab AC - Airport",
+        "Cab AC Sedan - Airport",
+        "Cab SUV",
+        "Cab Premium - Airport",
+        "Cab AC Sedan",
+        "Cab Daily",
+        "Cab Economy - Intercity",
+        "CabAC",
+        "Cab Priority",
+        "Cab SUV - Airport",
+        "Cab SUV - Intercity",
+        "Cab Economy - Airport",
+        "Cab Premium Biz"
+      ],
+      "definition": "Monthly city sum of completed (dropped) orders across the approved Cab service family for all customers.",
+      "caveats": [
+        "Covers all customers across the approved Cab service variants and excludes c2c."
+      ]
+    },
     "i2r": {
       "id": "i2r",
       "label": "Install-to-Registration Ratio",
@@ -203,6 +427,98 @@
       "caveats": [
         "Reported Bike/Link, Auto, and Cab PFTU shares need not sum to 100%; Cab excludes c2c."
       ]
+    },
+    "fe2rr": {
+      "id": "fe2rr",
+      "label": "FE-to-RR Ratio",
+      "aliases": [
+        "FE2RR"
+      ],
+      "kind": "ratio",
+      "unit": "fraction",
+      "display_unit": "percent",
+      "movement_unit": "percentage_points",
+      "numerator": "rr",
+      "denominator": "fe_sessions",
+      "formula": "rr / fe_sessions",
+      "definition": "Demand metric: how many Fare Estimates (FE) translate into Request Rapido (RR) sessions after checking the price.",
+      "caveats": [
+        "Computed from all-customer city-wide RR and FE sessions (not an FTU-eligible-only cohort).",
+        "Aggregate approved counts before dividing; never average city ratios."
+      ]
+    },
+    "rr2net": {
+      "id": "rr2net",
+      "label": "RR-to-Net Ratio",
+      "aliases": [
+        "RR2Net"
+      ],
+      "kind": "ratio",
+      "unit": "fraction",
+      "display_unit": "percent",
+      "movement_unit": "percentage_points",
+      "numerator": "net",
+      "denominator": "rr",
+      "formula": "net / rr",
+      "definition": "Fulfillment metric: how many Rapido Requests (RR) are actually fulfilled and translate into a dropped order (Net ride).",
+      "caveats": [
+        "Computed from all-customer city-wide Net rides and RR sessions; distinct from R2N (Registration-to-PFTU).",
+        "Aggregate approved counts before dividing; never average city ratios."
+      ]
+    },
+    "bike_rr2net": {
+      "id": "bike_rr2net",
+      "label": "Bike RR-to-Net Ratio",
+      "aliases": [
+        "Bike RR2Net"
+      ],
+      "kind": "ratio",
+      "unit": "fraction",
+      "display_unit": "percent",
+      "movement_unit": "percentage_points",
+      "numerator": "bike_net",
+      "denominator": "bike_rr",
+      "formula": "bike_net / bike_rr",
+      "definition": "Bike fulfillment metric: share of Bike Rapido Requests (RR) fulfilled into dropped Bike orders across all customers.",
+      "caveats": [
+        "Uses the six approved Bike service aliases for both Bike RR and Bike Net; aggregate counts before dividing."
+      ]
+    },
+    "auto_rr2net": {
+      "id": "auto_rr2net",
+      "label": "Auto RR-to-Net Ratio",
+      "aliases": [
+        "Auto RR2Net"
+      ],
+      "kind": "ratio",
+      "unit": "fraction",
+      "display_unit": "percent",
+      "movement_unit": "percentage_points",
+      "numerator": "auto_net",
+      "denominator": "auto_rr",
+      "formula": "auto_net / auto_rr",
+      "definition": "Auto fulfillment metric: share of Auto Rapido Requests (RR) fulfilled into dropped Auto orders across all customers.",
+      "caveats": [
+        "Uses the approved Auto service family for both Auto RR and Auto Net; aggregate counts before dividing."
+      ]
+    },
+    "cab_rr2net": {
+      "id": "cab_rr2net",
+      "label": "Cab RR-to-Net Ratio",
+      "aliases": [
+        "Cab RR2Net"
+      ],
+      "kind": "ratio",
+      "unit": "fraction",
+      "display_unit": "percent",
+      "movement_unit": "percentage_points",
+      "numerator": "cab_net",
+      "denominator": "cab_rr",
+      "formula": "cab_net / cab_rr",
+      "definition": "Cab fulfillment metric: share of Cab Rapido Requests (RR) fulfilled into dropped Cab orders across all customers.",
+      "caveats": [
+        "Uses the approved Cab service family (excluding c2c) for both Cab RR and Cab Net; aggregate counts before dividing."
+      ]
     }
   },
   "movements": {
@@ -211,7 +527,7 @@
       "label": "Absolute Change",
       "kind": "movement",
       "unit": "count",
-      "display_unit": "customers_or_installations",
+      "display_unit": "customers_installations_sessions_or_rides",
       "formula": "latest - previous",
       "definition": "Period-over-period difference in a count metric (latest count minus previous count)."
     },
@@ -257,7 +573,7 @@
       "components": {
         "grand_total": {
           "label": "Grand Total",
-          "definition": "Authoritative overall target for the month. It is independent of the summed city targets and is not reconciled to them; repeated New launch fallbacks never change it."
+          "definition": "Authoritative overall target for the month. It is independent of the summed city targets and is not reconciled to them; the pooled New launch fallback never changes it."
         },
         "city_target": {
           "label": "City target",
@@ -265,34 +581,81 @@
         },
         "new_launch_fallback": {
           "label": "New launch fallback",
-          "definition": "Repeated planning fallback used for each observed city absent from the plan's city list. It is not an allocation, a shared budget or launch evidence; explicit missing or nonpositive city targets do not trigger fallback."
+          "definition": "Single planning target for all observed cities absent from the plan, compared against their combined observed Platform FTU. It is not an allocation, per-city target, shared budget or launch evidence; explicit missing or nonpositive city targets do not join the pool."
         }
       }
     },
-    "target_shortfall": {
-      "id": "target_shortfall",
-      "label": "Target Shortfall",
+    "target_variance": {
+      "id": "target_variance",
+      "label": "Target Variance",
       "unit": "customers",
-      "formula": "target - actual",
-      "definition": "Signed gap between a city's assigned target and its observed Platform FTU. A positive shortfall is a target miss and a negative shortfall is an overshoot; missing operands make it unavailable, never zero."
+      "formula": "actual - target",
+      "definition": "Signed difference between observed Platform FTU and an assigned target, for a matched city or the pooled New launch group. A negative variance is a target miss (shortfall) and a positive variance is above target (overshoot); missing operands make it unavailable, never zero."
     },
-    "shortfall_percentage": {
-      "id": "shortfall_percentage",
-      "label": "Shortfall Percentage",
+    "variance_percentage": {
+      "id": "variance_percentage",
+      "label": "Variance Percentage",
       "unit": "percent",
-      "formula": "100 * (target - actual) / target",
-      "definition": "Shortfall relative to the city's own positive target, displayed as a percentage. It is unavailable for missing operands or a nonpositive target, while the valid absolute shortfall remains available."
+      "formula": "100 * (actual - target) / target",
+      "definition": "Signed variance relative to the assigned positive target (a city's target or the pooled New launch target), displayed as a percentage. Negative means below target and positive means above target. It is unavailable for missing operands or a nonpositive target, while the valid absolute variance remains available."
     },
     "target_shortlist": {
       "id": "target_shortlist",
       "label": "Material Target Miss Shortlist",
       "definition": "Policy-based list of cities whose own target miss is material. Arithmetic and ordering come from reviewed tools; this is not a severity, forecast or causal claim.",
-      "eligibility": "Strictly more than 5% below the city's own positive target; exactly 5% and smaller misses are excluded, and missing operands or nonpositive targets cannot qualify.",
-      "ordering": "Ranked by absolute Platform FTU shortfall descending, then city name.",
-      "coverage_selection": "Top mode selects in that order until cumulative shortfall covers X = max(overall target - observed actual, 0); all mode returns every qualifying city even when X is zero. The threshold is never relaxed.",
+      "eligibility": "Strictly more than 5% below the city's own positive target (variance < -5%); exactly -5% and smaller misses are excluded, and missing operands or nonpositive targets cannot qualify.",
+      "ordering": "Ranked by largest negative Platform FTU variance (largest shortfall) first, then city name.",
+      "coverage_selection": "Top mode selects in that order until cumulative shortfall covered reaches X = max(overall target - observed actual, 0); all mode returns every qualifying city even when X is zero. The threshold is never relaxed.",
       "match_queue": "Default plan-matched queue: cities with an explicit city target in the plan, selected and ranked on their own.",
-      "fallback_queue": "New launch fallback cities are excluded from the default queue and reported separately with their count, so fallback assignments never occupy the plan-matched ranking. Request the fallback queue to list them.",
-      "tier_scope": "For a tier, the target, actual and gap use only plan-matched cohort cities; fallback cities stay outside that calculation and national Grand Total reporting is unchanged."
+      "fallback_queue": "Unplanned cities are excluded from the default queue and returned only on explicit request as one pooled comparison of their non-null Platform FTU sum against the single New launch target, with an actual-only per-city breakdown. Every unplanned city has no individual target or variance.",
+      "tier_scope": "For a tier, the target, actual and gap use only plan-matched cohort cities; unplanned cities stay outside that tier calculation and are reported separately as the national New launch pool. National Grand Total reporting is unchanged."
+    },
+    "target_persistence": {
+      "id": "target_persistence",
+      "label": "Target Miss Widening Against Prior Month",
+      "definition": "Annotation of a currently returned material target miss whose variance percentage also worsened against the immediately previous stored month. Each row is labelled persistent or new_miss.",
+      "eligibility": "A currently returned plan-matched city must be strictly more than 5% below its own positive target (variance < -5%) in the selected month, and the immediately previous calendar month must have an explicit positive city target and a non-null actual. The same -5% rule labels the row; a prior-month material miss is not required.",
+      "comparison": "Listed only when current variance percentage minus previous variance percentage is strictly less than -5 percentage points (worsened by >5pp), evaluated with exact integer arithmetic before display rounding.",
+      "statuses": "persistent when the prior variance was also strictly less than -5% of its positive target, otherwise new_miss. failing_since is the previous month for persistent rows and the selected month for new_miss rows.",
+      "scope": "Only currently returned page cities with an explicit plan city target are checked; pooled New launch fallback cities have no individual target and are never annotated.",
+      "tier_scope": "The selected month's stored tier is the only tier source; the prior month's tier is not required to match.",
+      "limits": "A city that missed both months but improved is not listed. The list is not only persistent misses: new_miss rows were not a material miss in the prior month. Absence is not evidence that a city met earlier targets or that the prior month was complete."
+    }
+  },
+  "warehouse_queries": {
+    "resource": "sql/warehouse_queries.sql",
+    "queries": {
+      "installs-monthly": {
+        "metrics": [
+          "installs"
+        ]
+      },
+      "registrations-monthly": {
+        "metrics": [
+          "registrations"
+        ]
+      },
+      "ftu-monthly": {
+        "metrics": [
+          "platform_ftu",
+          "platform_link_ftu",
+          "platform_auto_ftu",
+          "platform_cab_ftu"
+        ]
+      },
+      "funnel-monthly": {
+        "metrics": [
+          "fe_sessions",
+          "rr",
+          "net",
+          "bike_rr",
+          "bike_net",
+          "auto_rr",
+          "auto_net",
+          "cab_rr",
+          "cab_net"
+        ]
+      }
     }
   },
   "glossary_distinctions": {
@@ -301,10 +664,10 @@
       "supported_in_v1": false,
       "definition": "A customer taking a particular Rapido service for the first time, even after completing earlier rides on another Rapido service. GrowthOS V1 service breakdowns measure service PFTU (first-ever Rapido ride), not SVN."
     },
-    "rr2net": {
-      "term": "RR2Net",
+    "ao": {
+      "term": "App Opens (AO)",
       "supported_in_v1": false,
-      "definition": "Ride-request fulfilment ratio (dropped rides relative to ride requests). GrowthOS R2N is Registration-to-PFTU, not RR2Net."
+      "definition": "App opens (AO). Recorded in the business glossary; not currently extracted or stored in irf.facts."
     }
   },
   "rules": {

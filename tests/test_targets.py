@@ -8,7 +8,7 @@ from growthos.contracts import validate_data
 from growthos.errors import GrowthOSError
 from growthos.metrics import target_attainment
 from growthos.selection import validate_target_request
-from growthos.targets import target_schema_sql, targets_from_records, validate_targets
+from growthos.targets import TARGET_DB_FIELDS, target_schema_sql, targets_from_records, validate_targets
 from fixtures import demo_payload, demo_targets
 
 
@@ -26,10 +26,12 @@ def plan(values, overall=1000, fallback=100):
     raw = demo_targets().data
     raw["rows"] = [r for r in raw["rows"] if r["kind"] != "city"]
     for row in raw["rows"]:
-        row["target"] = overall if row["kind"] == "overall" else fallback
-        row["source_targets"][0]["target"] = row["target"]
+        value = overall if row["kind"] == "overall" else fallback
+        row["platform_ftu_target"] = value
+        row["registrations_target"] = value
     raw["rows"] += [{"month": "2026-10", "kind": "city", "city_key": normalize_city_key(city),
-                     "city": city, "target": count, "source_targets": [{"city": city, "target": count}]}
+                     "city": city, "platform_ftu_target": count,
+                     "registrations_target": count}
                     for city, count in values]
     return validate_targets(raw)
 
@@ -45,7 +47,9 @@ class TargetAnalysisTests(unittest.TestCase):
         large = 20 * ((2**63 - 1) // 20)
         self.assertFalse(target_attainment(large, large - large // 20).qualifies)
         self.assertTrue(target_attainment(large, large - large // 20 - 1).qualifies)
-        self.assertEqual(target_attainment(1000, 949).shortfall_pct, 5.1)
+        self.assertEqual(target_attainment(1000, 949).variance_pct, -5.1)
+        self.assertEqual(target_attainment(1000, 949).variance, -51)
+        self.assertEqual(target_attainment(1000, 1050).variance_pct, 5.0)
 
     def test_descending_shortfall_city_ties_and_cumulative_overshoot(self):
         result = target_cities(self.actuals, self.targets, "2026-10")
@@ -97,7 +101,7 @@ class TargetAnalysisTests(unittest.TestCase):
             self.assertEqual(top["rows"], [])
             self.assertEqual(len(target_cities(self.actuals, targets, "2026-10", mode="all")["rows"]), 3)
 
-    def test_fallback_is_repeated_and_kept_out_of_the_matched_queue(self):
+    def test_fallback_is_pooled_and_kept_out_of_the_matched_queue(self):
         actuals = observations([("New A", 10), ("New B", 30), ("Explicit Zero", 0)])
         targets = plan([("Explicit Zero", 0)], overall=200, fallback=100)
         result = target_cities(actuals, targets, "2026-10", mode="all")
@@ -108,13 +112,21 @@ class TargetAnalysisTests(unittest.TestCase):
         self.assertEqual(result["coverage"]["fallback_city_count"], 2)
         self.assertEqual(result["coverage"]["excluded_city_counts"]["nonpositive_target"], 1)
         summary = result["fallback"]
-        self.assertEqual((summary["target"], summary["city_count"], summary["eligible_city_count"], summary["recorded_actual"]), (100, 2, 2, 40))
-        self.assertIn("not individually planned city targets", summary["disclosure"])
+        self.assertEqual(
+            (summary["target"], summary["actual"], summary["variance"], summary["variance_pct"], summary["qualifies"]),
+            (100, 40, -60, -60, True),
+        )
+        self.assertEqual(
+            (summary["city_count"], summary["observed_city_count"], summary["skipped_null_city_count"]),
+            (2, 2, 0),
+        )
+        self.assertIn("combined observed", summary["disclosure"])
+        self.assertFalse(any("Some target or actual operands are unavailable" in w for w in result["warnings"]))
         fallback = target_cities(actuals, targets, "2026-10", queue="fallback")
         self.assertEqual([r["city"] for r in fallback["rows"]], ["New A", "New B"])
-        self.assertEqual([r["target"] for r in fallback["rows"]], [100, 100])
-        self.assertEqual([r["shortfall"] for r in fallback["rows"]], [90, 70])
-        self.assertEqual(fallback["coverage"]["selection_status"], "fallback_all_eligible")
+        self.assertEqual([r["actual"] for r in fallback["rows"]], [10, 30])
+        self.assertNotIn("target", fallback["rows"][0])
+        self.assertEqual(fallback["coverage"]["selection_status"], "pooled_new_launch")
         self.assertEqual(fallback["overall"]["target"], 200)
 
     def test_missing_actuals_targets_and_nonpositive_fallback(self):
@@ -132,9 +144,14 @@ class TargetAnalysisTests(unittest.TestCase):
         self.assertEqual(top["coverage"]["selection_status"], "complete")
         self.assertEqual(result["coverage"]["fallback_city_count"], 1)
         self.assertEqual(result["fallback"]["city_count"], 1)
-        self.assertEqual(result["fallback"]["eligible_city_count"], 0)
-        self.assertEqual(result["fallback"]["excluded_city_counts"]["nonpositive_target"], 1)
-        self.assertEqual(target_cities(actuals, targets, "2026-10", queue="fallback")["rows"], [])
+        self.assertEqual((result["fallback"]["target"], result["fallback"]["actual"]), (0, 1))
+        self.assertEqual(result["fallback"]["variance"], 1)
+        self.assertEqual(result["fallback"]["unavailable_reason"], "nonpositive_target")
+        self.assertFalse(result["fallback"]["qualifies"])
+        rows = target_cities(actuals, targets, "2026-10", queue="fallback")["rows"]
+        self.assertEqual([r["city"] for r in rows], ["New"])
+        self.assertEqual((rows[0]["actual"], rows[0]["target_source"]), (1, "new_launch"))
+        self.assertNotIn("target", rows[0])
         with self.assertRaises(GrowthOSError):
             target_cities(actuals, targets, "2026-10", queue="PRIVATE_marker")
 
@@ -156,13 +173,10 @@ class TargetAnalysisTests(unittest.TestCase):
             with self.assertRaises(GrowthOSError):
                 validate_target_request(*args, now=now)
 
-    def test_one_time_merged_review_preserves_source_targets_and_does_not_double_actual(self):
+    def test_one_time_merged_review_does_not_double_actual(self):
         raw = plan([("Trivandrum", 100)]).data
-        row = next(r for r in raw["rows"] if r["kind"] == "city")
-        row["source_targets"] = [{"city": "Attingal", "target": 30}, {"city": "Trivandrum", "target": 70}]
         result = target_city_review(observations([("Trivandrum", 80)]), validate_targets(raw), "trivandrum")
-        self.assertEqual((result["target"], result["actual"], result["shortfall"], result["shortfall_pct"]), (100, 80, 20, 20))
-        self.assertEqual(len(result["source_targets"]), 2)
+        self.assertEqual((result["target"], result["actual"], result["variance"], result["variance_pct"]), (100, 80, -20, -20))
 
 
 class TargetContractTests(unittest.TestCase):
@@ -171,45 +185,51 @@ class TargetContractTests(unittest.TestCase):
         result = validate_targets(raw)
         raw["rows"].reverse()
         self.assertEqual(result, validate_targets(raw))
-        raw["rows"][0]["target"] = 123
+        raw["rows"][0]["platform_ftu_target"] = 123
         self.assertNotEqual(result.data, raw)
         sql = target_schema_sql()
-        self.assertIn("CREATE TABLE irf.pftu_targets", sql)
+        self.assertIn("CREATE TABLE irf.targets", sql)
+        self.assertIn("CREATE TABLE irf.target_imports", sql)
         self.assertNotIn("REFERENCES", sql)
 
-    def test_contract_rejects_duplicates_missing_specials_and_invalid_components(self):
-        for fault in ("duplicate", "special", "component", "negative", "boolean", "source_city", "digest"):
+    def test_dual_metric_rows_allow_independent_unavailable_targets(self):
+        raw = demo_targets().data
+        city = next(r for r in raw["rows"] if r["kind"] == "city")
+        city["registrations_target"] = None
+        result = validate_targets(raw)
+        row = next(r for r in result.data["rows"] if r["kind"] == "city")
+        self.assertEqual((row["platform_ftu_target"], row["registrations_target"]), (80, None))
+
+    def test_contract_rejects_duplicates_missing_specials_and_invalid_counts(self):
+        for fault in ("duplicate", "special", "negative", "boolean", "registration_negative"):
             raw = copy.deepcopy(demo_targets().data)
             city = next(r for r in raw["rows"] if r["kind"] == "city")
             if fault == "duplicate":
                 raw["rows"].append(city)
             elif fault == "special":
                 raw["rows"] = [r for r in raw["rows"] if r["kind"] != "overall"]
-            elif fault == "component":
-                city["source_targets"][0]["target"] += 1
             elif fault in ("negative", "boolean"):
-                city["target"] = -1 if fault == "negative" else True
-            elif fault == "source_city":
-                city["source_targets"][0]["city"] = "Another"
+                city["platform_ftu_target"] = -1 if fault == "negative" else True
             else:
-                raw["source_checksum"] = "bad"
+                city["registrations_target"] = -1
             with self.subTest(fault=fault), self.assertRaises(GrowthOSError):
                 validate_targets(raw)
 
-    def test_stored_integrity_detects_deleted_changed_or_inconsistent_records(self):
+    def test_stored_records_are_structurally_validated_without_provenance(self):
         target = demo_targets()
-        data = target.data
-        records = [{**r, "source_checksum": data["source_checksum"], "imported_at": data["imported_at"],
-                    "month_checksum": target.result_checksum, "month_row_count": len(data["rows"])} for r in data["rows"]]
+        records = [{k: r[k] for k in TARGET_DB_FIELDS} for r in target.data["rows"]]
         self.assertEqual(targets_from_records(records), target)
-        for fault in ("deleted", "changed", "metadata"):
+        for fault in ("missing_special", "month", "duplicate"):
             broken = copy.deepcopy(records)
-            if fault == "deleted":
-                broken.pop(0)
-            elif fault == "changed":
-                broken[0]["target"] += 1
-                broken[0]["source_targets"][0]["target"] += 1
+            if fault == "missing_special":
+                broken = [r for r in broken if r["kind"] != "overall"]
+            elif fault == "month":
+                broken[0]["month"] = "2026-09"
             else:
-                broken[0]["month_checksum"] = "b" * 64
+                broken.append(copy.deepcopy(broken[0]))
             with self.subTest(fault=fault), self.assertRaises(GrowthOSError):
                 targets_from_records(broken)
+        # Stored targets carry no source fingerprint, so a changed value is not detectable after import.
+        changed = copy.deepcopy(records)
+        changed[0]["platform_ftu_target"] += 1
+        targets_from_records(changed)

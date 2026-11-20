@@ -10,7 +10,7 @@ import re
 from .contracts import FACT_FIELDS, MAX_FACTS, MAX_MONTHS, checksum, month, validate_data, validate_metadata
 from .errors import reject
 from .evidence import CITY_PAGE_SIZE, status_result, validate_city_offset
-from .targets import TARGET_DB_FIELDS, targets_from_records
+from .targets import METRICS, TARGET_DB_FIELDS, targets_from_records
 
 DEFAULT_ENV_FILE: Path | None = Path(__file__).resolve().parents[1] / ".env"
 _UNSET = object()
@@ -85,13 +85,12 @@ def read_target_month(connection, value: str):
     selected = month(value)
     with connection.cursor() as cursor:
         cursor.execute(
-            f"SELECT {','.join(TARGET_DB_FIELDS)} FROM irf.pftu_targets WHERE month=%s ORDER BY kind, city_key LIMIT %s",
+            f"SELECT {','.join(TARGET_DB_FIELDS)} FROM irf.targets WHERE month=%s ORDER BY kind, city_key LIMIT %s",
             (selected, MAX_FACTS + 1),
         )
         records = [dict(zip(TARGET_DB_FIELDS, row)) for row in cursor.fetchmany(MAX_FACTS + 1)]
     for row in records:
         row["month"] = row["month"].isoformat()[:7]
-        row["imported_at"] = row["imported_at"].isoformat()
     result = targets_from_records(records)
     if result.data["month"] != value:
         reject("STORE_INTEGRITY", "Stored target month does not match the request.")
@@ -139,16 +138,33 @@ class PostgresStore:
     def load_targets(self, value: str):
         month(value)
         with self.connection.cursor() as cursor:
-            cursor.execute("SELECT to_regclass('irf.pftu_targets')")
-            if cursor.fetchone() == (None,):
-                reject("TARGETS_UNAVAILABLE", "PFTU targets are not installed; existing monthly analysis remains available.")
-            cursor.execute("""SELECT has_table_privilege(current_user, 'irf.pftu_targets', 'SELECT')
-                AND NOT has_table_privilege(current_user, 'irf.pftu_targets',
+            cursor.execute("SELECT to_regclass('irf.targets'), to_regclass('irf.target_imports')")
+            if cursor.fetchone() != ('irf.targets', 'irf.target_imports'):
+                reject("TARGETS_UNAVAILABLE", "Stored targets are not installed; existing monthly analysis remains available.")
+            cursor.execute("""SELECT has_table_privilege(current_user, 'irf.targets', 'SELECT')
+                AND NOT has_table_privilege(current_user, 'irf.targets',
+                    'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER,REFERENCES')
+                AND has_table_privilege(current_user, 'irf.target_imports', 'SELECT')
+                AND NOT has_table_privilege(current_user, 'irf.target_imports',
                     'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER,REFERENCES')
                 AND NOT has_schema_privilege(current_user, 'irf', 'CREATE')""")
             if cursor.fetchone() != (True,):
-                reject("READ_ONLY_ROLE", "Target analysis requires SELECT-only access to PFTU targets.")
+                reject("READ_ONLY_ROLE", "Target analysis requires SELECT-only access to stored targets.")
         return read_target_month(self.connection, value)
+
+    def target_months(self, metric: str = "platform_ftu") -> list[str]:
+        """Bounded stored target months for one metric; caller enforces table permissions first."""
+        if metric not in METRICS:
+            reject("ARGUMENTS", "Unsupported target metric.")
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass('irf.target_imports')")
+            if cursor.fetchone() == (None,):
+                return []
+            cursor.execute(
+                "SELECT month FROM irf.target_imports WHERE metric=%s ORDER BY month LIMIT %s",
+                (metric, MAX_MONTHS + 1),
+            )
+            return [row[0].isoformat()[:7] for row in cursor.fetchmany(MAX_MONTHS + 1)]
 
     def load(self, months: list[str] | None = None):
         selected = self.available_months()[-2:] if months is None else months

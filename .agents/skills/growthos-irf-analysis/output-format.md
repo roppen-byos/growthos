@@ -1,85 +1,56 @@
-# IRF answer format
+# IRF Answer Format
 
-Use this reference when composing analytical answers. The skill owns tool use and
-interpretation; [report-playbook.md](report-playbook.md) owns required investigations
-and report-specific evidence. Formatting never replaces those checks.
+The active skill (`growthos-irf-analysis` or `growthos-ftu-investigation`) governs tool use and interpretation; [report-playbook.md](report-playbook.md) governs required report investigations. Formatting never replaces those checks.
 
 ## Answer first, then evidence
 
-1. **Bottom line:** answer the question in one or two sentences. State the selected
-   period and scope. Put any limitation that invalidates or materially qualifies
-   the headline beside it, not only at the end.
-2. **Evidence:** show a compact comparison or ranking table when it helps. Lead with
-   volumes and absolute movement (`absolute_delta`, or clearly labeled
-   `known_subtotal_delta` for partial coverage), then growth, ratios and shares.
-3. **Explanation:** highlight up to three findings supported by the required
-   tier/city evidence. Explain relationships rather than repeating every cell.
-   Longer requested reports may need additional findings.
-4. **Limitations and data note:** consolidate relevant unavailable observations,
-   coverage/mapping warnings and month metadata/source-read times once per answer.
-   Identify which months/sources each timestamp describes; do not collapse distinct
-   reads into an invented common cutoff. Read times do not certify completeness.
+1. **Bottom line:** lead with a 1–2 sentence direct answer naming the selected period and scope. Place any limitation that invalidates or materially qualifies the headline right beside it, not only at the end.
+2. **Evidence:** present compact native Markdown tables when helpful. Lead with volumes and signed absolute change (`absolute_delta`, or clearly labeled **known subtotal** change for partial coverage), then growth, ratios, and shares.
+3. **Explanation:** synthesize 2–3 high-signal findings supported by tier/city evidence (or more for full master reports). Connect *what moved* to *where it concentrated* (tier/city share of change, numerator vs denominator drivers, persistent vs new misses) rather than narrating rows already visible in the table.
+4. **Limitations & data note:** consolidate relevant unavailable observations, coverage/mapping warnings, and month metadata/source-read times once at the end. Identify which months and sources each timestamp covers; never invent a single shared cutoff for distinct reads, and never equate read times with source completeness.
+5. **Bounded next step (optional):** when natural in-scope follow-ups exist (remaining paged rows, opt-in New launch fallback breakdown, direct Registration check for a `no_historical_ftu_dip` city), close with one specific offer rather than auto-running unrequested calls or making operational recommendations.
 
-Use only the sections the question needs. A simple factual question can be a direct
-answer with a short data note; it does not require an empty table or full report.
+Size the response to the question: a single-city lookup needs a crisp bottom line, compact table or bullet facts, and a brief data note — not a full report template.
 
 ## Match the question
 
 | Request | Presentation |
 | --- | --- |
-| Two-month comparison | Bottom line, volume table, separate ratio/share table, explanation and limitations |
-| City ranking | Ranked table; state metric, delta/growth basis, direction, tier/filter and top-N scope |
-| Target lookup / attainment | Overall target/actual/shortfall, requested city evidence and scope; use [target-analysis.md](target-analysis.md) for facts versus selection, units and full-list delivery |
-| Ratio investigation | Ratio movement, both operands, then tier/city explanation and coverage caveats |
-| Master report | Overall funnel, tiers/services, city drivers, limitations; follow the playbook |
-| Three-month view | Monthly observations and adjacent changes; clearly label endpoint period comparisons |
+| Two-month comparison | Bottom line, volume table, separate ratio/share table, synthesis, and data note |
+| City ranking | Ranked table; state metric, delta/growth basis, direction, tier/filter, and top-N scope |
+| Target lookup / attainment / shortlist | Overall (or tier) target/actual/variance (plus gap to cover `X`), requested city evidence, separate pooled New launch fallback line, and first-page-then-ask continuation per [target-analysis.md](target-analysis.md) |
+| Widening target misses | Main target table first; then a separate "Widening target misses vs `<previous_month>` (`< -5pp`)" table showing status (`persistent` / `new_miss`), current/prior variance %, pp change, and failing-since month |
+| Ratio investigation | Ratio movement, both numerator and denominator movements, tier/city drivers, and coverage caveats |
+| Master report | Overall funnel, tier/service matrix, city drivers, limitations; follow [report-playbook.md](report-playbook.md) |
+| Three-month view | Side-by-side monthly observations and adjacent changes; label endpoint comparisons as period comparisons |
+| Registration target investigation (`investigate`) | Same-month target table (`FTU Target \| FTU Actual \| FTU Gap \| Reg Target \| Reg Actual \| Reg Variance % \| Reg Contribution % \| Verdict`), stating the strict `< -5%` Registration target-miss rule once; follow [registration-contribution.md](../growthos-ftu-investigation/registration-contribution.md) |
+| FTU target-miss / MoM funnel investigation (`investigate` + `investigate-funnel`, Layer 2) | Runs on the widening-miss (`persistent` / `new_miss`) cities by default (or explicitly requested scopes); bottom line prioritized (`persistent` before `new_miss`), clearly separated **Target lens** (FTU + independent Registration `< -5%` target check) and **Historical funnel lens** (`City \| Cal.-Adj. MoM FTU Dip \| Material Drivers (>20%) \| FE Share of Dip \| FE2RR Share of Dip \| RR2Net Share of Dip`, bold `>20%`, `*(improved)*` on `<=0%`), and one consolidated proxy/scaling/coverage note; follow [growthos-ftu-investigation/SKILL.md](../growthos-ftu-investigation/SKILL.md) |
 
-Keep a narrow question narrow. This controls presentation length, not the evidence
-collection required by the playbook.
+Question size controls presentation length, never required evidence collection.
 
 ## Tables
 
-- Use native Markdown pipe tables directly in the answer, outside code fences;
-  use prose or bullets for non-tabular findings.
-- Prefer five or six columns. Split wider tables into labeled panels, retaining
-  the same city/tier keys and periods so panels can be matched.
-- For volumes, use `Metric | <previous month> | <latest month> | Change | Growth`.
-  For ratios/shares, use `Metric | <previous month> | <latest month> | Change (pp)`.
-  Replace month placeholders with actual month/year labels.
-- Left-align labels and right-align numeric columns. Use business names from the
-  metric catalogue, such as `Platform FTU`, rather than internal JSON keys.
-- State ranking scope precisely: e.g. “largest absolute Platform FTU declines,”
-  not “worst cities.” A least-positive result is not a decline. Preserve the
-  tool's ordering, ties, signed movements and any omitted-result disclosure.
+- Render native Markdown pipe tables directly in the answer, outside code fences; use prose or bullets for non-tabular findings.
+- Keep tables compact (5–6 columns). Split wider evidence into labeled panels sharing the same city/tier keys and periods so rows align across panels.
+- Standard column headers (replace placeholders with actual month/year labels):
+  - Volumes: `Metric | <previous> | <latest> | Change | Growth`
+  - Ratios / shares: `Metric | <previous> | <latest> | Change (pp)`
+  - Targets: `City | Target | Actual | Variance | Variance %` (add `Cum. Shortfall Covered` for selection shortlists)
+- Left-align text labels and right-align numeric columns.
+- Use business names from the metric catalogue (e.g. `Platform FTU`, `Bike/Link PFTU`, `FE sessions`) and readable verdict labels rather than raw JSON keys: lowercase for funnel-stage verdicts (`material contributor`, `below threshold`, `same or better`, `no historical dip`, `undetermined`), sentence case for target verdicts (`Registration priority`). Keep internal governance IDs (`DEC-*`, `ADR-*`) and physical table/column names (`irf.facts`, `fe_sessions`) out of business answers unless technical provenance is requested.
+- State ranking scope accurately: e.g. "largest absolute Platform FTU declines," not "worst cities." A least-positive gain is not a decline. Preserve exact CLI ordering, ties, signed movements, and omitted-row disclosures.
 
 ## Numbers and unavailable values
 
-- Show integer counts exactly, with thousands separators; avoid K/M abbreviations
-  unless the user requests compact units. Label any requested scale explicitly.
-- Display fractional ratios, shares and growth as percentages. Display ratio/share
-  movement as percentage points (`pp`), not relative growth. Respect CLI column
-  units: `delta_pp` is already in percentage points; convert fractions only once.
-- Default to two decimal places for percentages and `pp`, consistently within a
-  column. Increase precision when needed to keep a nonzero movement visible;
-  never imply flat movement through rounding. Display rounding does not change
-  tool calculations or ranking order.
-- Prefix positive changes with `+` and retain negative signs. Show actual zero as
-  zero, not as a missing-value marker.
-- Render unavailable values as `N/A`, with their supplied reason beside the table
-  or in a note. Label `known_subtotal*` values as **known subtotals**, with applicable
-  unavailable counts; they are not full totals. Use the metric catalogue's caveats
-  rather than assuming every percentage is capped at 100%.
+- Format integer counts exactly with thousands separators (`1,234,567`); avoid K/M abbreviations unless requested, and label any requested unit explicitly.
+- Display fractional ratios, shares, and growth as percentages; display ratio/share movement as percentage points (`pp`), not relative growth. Respect CLI units: `delta_pp`, `variance_pct`, `rate_delta_pp`, `relative_change_pct`, and `contribution_pct` are already scaled in percentage/pp units — convert raw fractions (`0..1`) only once.
+- Default to two decimal places for percentages and `pp`, consistent within a column. Add decimals when needed so a nonzero movement never rounds to `0.00%` / `0.00pp`. Display rounding never alters CLI thresholds or ordering.
+- Always show explicit signs: prefix positive deltas/variances with `+` and retain `-` for negatives (`variance = actual - target`, so misses are `-` and beats are `+`; widening misses are `-pp`). Show observed zero as `0`, never as `N/A`.
+- Render unavailable values as `N/A` with their returned reason beside the table or in the data note. Label `known_subtotal*` values explicitly as **known subtotals** with unavailable city counts. Never cap period ratios at 100% or clip `over_explained` (`> 100%`) contributions (mark them as partial offsets).
 
 ## Commentary and evidence
 
-- Separate **Observed** facts, arithmetic **Interpretation**, unverified
-  **Hypotheses**, and **Limitations** when the distinction matters; do not force
-  four headings onto every answer.
-- A higher ratio is not automatically volume growth or conversion improvement.
-  Explain both operands using the playbook's investigation before making a claim.
-- Use measured direction and magnitude rather than unsupported labels such as
-  “critical,” “healthy” or “statistically significant.” No severity thresholds or
-  causal conclusions are introduced by this format.
-- Keep structured CLI evidence as JSON internally. Present readable findings and
-  tables; reproduce raw JSON only when explicitly requested. Include requested
-  checksums/provenance details without inventing historical reproducibility.
+- Distinguish **Observed** facts, arithmetic **Interpretation**, unverified **Hypotheses**, and **Limitations** whenever the boundary matters (without forcing four rigid headings onto every short answer).
+- Never equate a rising ratio with volume growth or conversion improvement until both numerator and denominator have been inspected.
+- Describe measured direction and magnitude instead of unsupported qualitative labels ("critical," "healthy," "statistically significant"). Formatting introduces no severity thresholds or causal claims.
+- Keep CLI JSON internal; reproduce raw JSON only when explicitly requested. Share requested checksums/provenance honestly without implying historical snapshot reproducibility.

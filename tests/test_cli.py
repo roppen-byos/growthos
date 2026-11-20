@@ -8,7 +8,7 @@ from unittest.mock import patch
 from growthos.cli import main
 from growthos.errors import GrowthOSError
 from growthos.evidence import catalog
-from fixtures import demo_data, demo_payload, fixture_reader
+from fixtures import demo_data, demo_payload, demo_targets, fixture_reader
 from growthos.contracts import validate_data
 from growthos.postgres import validate_reader_settings
 
@@ -107,8 +107,8 @@ class CliTests(unittest.TestCase):
 
     def test_supported_operations_are_exposed(self):
         self.assertEqual(catalog(demo_data())["supported_operations"], [
-            "status", "compare", "rank", "funnel", "share-drivers", "verify",
-            "target-analysis", "target-facts",
+            "status", "compare", "rank", "funnel", "share-drivers", "warehouse-queries", "verify",
+            "target-analysis", "target-facts", "investigate", "investigate-funnel",
         ])
 
     def test_verify_selected_months_and_explicit_period_comparison(self):
@@ -117,13 +117,15 @@ class CliTests(unittest.TestCase):
         self.assertEqual(output["months"], ["2026-08", "2026-09"])
         self.assertEqual(self.invoke_fixture(["compare", "--previous", "2026-08", "--latest", "2026-10"])[0], 0)
 
-    def test_target_commands_route_one_month_and_return_shaped_output(self):
+    def test_target_commands_read_prior_month_and_return_shaped_output(self):
         code, analysis = self.invoke_fixture(["target-analysis", "--month", "2026-10", "--limit", "1"])
         self.assertEqual(code, 0)
-        self.assertEqual(analysis["months"], ["2026-10"])
+        self.assertEqual(analysis["months"], ["2026-09", "2026-10"])
         self.assertEqual(analysis["row_count"], 1)
         self.assertEqual(analysis["next_offset"], 1)
-        self.assertTrue({"overall", "coverage", "queue", "rows"} <= set(analysis))
+        self.assertTrue({"overall", "coverage", "queue", "rows", "persistent_failure"} <= set(analysis))
+        self.assertTrue(analysis["persistent_failure"]["available"])
+        self.assertEqual(analysis["persistent_failure"]["previous_month"], "2026-09")
 
         code, page = self.invoke_fixture(["target-analysis", "--month", "2026-10", "--mode", "all", "--offset", "1"])
         self.assertEqual(code, 0)
@@ -131,8 +133,8 @@ class CliTests(unittest.TestCase):
 
         code, facts = self.invoke_fixture(["target-facts", "--month", "2026-10"])
         self.assertEqual(code, 0)
-        self.assertEqual((facts["operation"], facts["months"]), ("target-facts", ["2026-10"]))
-        self.assertTrue({"overall", "coverage", "rows"} <= set(facts))
+        self.assertEqual((facts["operation"], facts["months"]), ("target-facts", ["2026-09", "2026-10"]))
+        self.assertTrue({"overall", "coverage", "rows", "persistent_failure"} <= set(facts))
 
     def test_target_invalid_arguments_fail_before_reader_and_hide_inputs(self):
         with patch("growthos.cli.connect_reader") as reader:
@@ -201,6 +203,52 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(fallback["queue"], "fallback")
             self.assertIn("New Town", [r["city"] for r in fallback["rows"]])
+
+    def test_target_cli_returns_prior_month_persistence_rows(self):
+        from contextlib import contextmanager
+        from growthos.targets import validate_targets
+        from fixtures import FixtureReaderStore
+        raw = demo_payload()
+        raw["months"] = ["2026-09", "2026-10"]
+        raw["month_metadata"] = [m for m in raw["month_metadata"] if m["month"] in raw["months"]]
+        base = raw["facts"][-1]
+        raw["facts"] = [
+            {**base, "month": m, "city": "Alpha", "city_key": "alpha",
+             "source_cities": ["Alpha"], "platform_ftu": actual}
+            for m, actual in (("2026-09", 80), ("2026-10", 60))
+        ]
+        data = validate_data(raw)
+
+        def targets(value):
+            plan = demo_targets(value).data
+            plan["rows"] = [r for r in plan["rows"] if r["kind"] != "city"]
+            for row in plan["rows"]:
+                target_value = 1000 if row["kind"] == "overall" else 100
+                row["platform_ftu_target"] = target_value
+                row["registrations_target"] = 2 * target_value
+            plan["rows"].append({
+                "month": value, "kind": "city", "city_key": "alpha", "city": "Alpha",
+                "platform_ftu_target": 100, "registrations_target": 200})
+            return validate_targets(plan)
+
+        @contextmanager
+        def reader():
+            yield FixtureReaderStore(data, target_months=["2026-09", "2026-10"])
+
+        with patch("fixtures.demo_targets", side_effect=targets), \
+                patch("growthos.cli.connect_reader", reader):
+            for command in ("target-analysis", "target-facts"):
+                with self.subTest(command=command):
+                    output = io.StringIO()
+                    with redirect_stdout(output):
+                        code = main([command, "--month", "2026-10"])
+                    self.assertEqual(code, 0)
+                    persistence = json.loads(output.getvalue())["persistent_failure"]
+                    self.assertEqual(persistence["previous_month"], "2026-09")
+                    self.assertEqual(persistence["city_count"], 1)
+                    self.assertEqual(persistence["rows"][0]["city"], "Alpha")
+                    self.assertEqual((persistence["rows"][0]["status"], persistence["rows"][0]["failing_since"]),
+                                     ("persistent", "2026-09"))
 
     def test_target_error_is_sanitized_and_missing_install_does_not_disable_existing_commands(self):
         with patch("fixtures.FixtureReaderStore.load_targets", side_effect=GrowthOSError(

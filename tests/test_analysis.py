@@ -3,7 +3,7 @@ from decimal import Decimal
 import unittest
 
 from growthos.analysis import catalog, city_funnels, compare_overall, rank_cities, share_drivers
-from growthos.contracts import RATIOS, VOLUMES, validate_data
+from growthos.contracts import PUBLIC_VOLUMES, RATIOS, VOLUMES, validate_data
 from growthos.errors import GrowthOSError
 from growthos.evidence import MISSING_TOTALS_WARNING, TIER_RECLASSIFIED_WARNING
 from fixtures import demo_payload, demo_data
@@ -261,7 +261,7 @@ class AnalysisTests(unittest.TestCase):
         columns, expected = ["city", "city_key", "tier"], {"city": "Harbor", "city_key": "harbor", "tier": "T1"}
         units = {c: "text" for c in columns}
         full = city_funnels(dataset, cities=["Harbor"])["rows"][0]
-        for group, metrics in (("volumes", VOLUMES), ("ratios", RATIOS)):
+        for group, metrics in (("volumes", PUBLIC_VOLUMES), ("ratios", RATIOS)):
             for metric in metrics:
                 values = full[group][metric]
                 fields = {metric: values["latest"], f"{metric}_previous": values["previous"]}
@@ -299,6 +299,10 @@ class AnalysisTests(unittest.TestCase):
         for sort in ("unknown", "city", "i2r_mom_pct"):
             with self.subTest(sort=sort), self.assertRaises(GrowthOSError):
                 city_funnels(dataset, sort_by=sort)
+        for tier in (None, "T2"):
+            with self.subTest(tier=tier), self.assertRaises(GrowthOSError):
+                city_funnels(dataset, tier=tier, sort_by="unknown")
+        self.assertEqual(city_funnels(dataset, tier="T2")["row_count"], 0)
 
     def test_funnel_null_sort_values_stay_last_and_project_as_unavailable(self):
         raw = demo_payload()
@@ -319,6 +323,44 @@ class AnalysisTests(unittest.TestCase):
             for row in (harbor, vale):
                 for field in ("i2r_delta_pp", "i2r_mom_abs", "i2r_mom_pct"):
                     self.assertIsNone(row[field])
+
+    def test_public_funnel_metrics_and_ratios_work_across_compare_rank_and_funnel(self):
+        dataset = demo_data()
+        overall = compare_overall(dataset)["rows"][0]
+        # Sep: FE=700, RR=350, Net=275; Oct: FE=1100, RR=600, Net=456
+        self.assertEqual(overall["volumes"]["fe_sessions"]["previous"]["value"], 700)
+        self.assertEqual(overall["volumes"]["fe_sessions"]["latest"]["value"], 1100)
+        self.assertEqual(overall["volumes"]["fe_sessions"]["absolute_delta"], 400)
+        self.assertEqual(overall["volumes"]["rr"]["latest"]["value"], 600)
+        self.assertEqual(overall["volumes"]["net"]["latest"]["value"], 456)
+        self.assertAlmostEqual(overall["ratios"]["fe2rr"]["previous"], 350 / 700)
+        self.assertAlmostEqual(overall["ratios"]["fe2rr"]["latest"], 600 / 1100)
+        self.assertAlmostEqual(overall["ratios"]["rr2net"]["previous"], 275 / 350)
+        self.assertAlmostEqual(overall["ratios"]["rr2net"]["latest"], 456 / 600)
+        self.assertAlmostEqual(overall["ratios"]["bike_rr2net"]["latest"], 198 / 260)
+
+        # Harbor: FE2RR 0.50 -> 0.60 (+10pp), RR2Net 0.80 -> 0.75 (-5pp)
+        # Vale: FE2RR 0.50 -> 0.40 (-10pp), RR2Net 0.75 -> 0.80 (+5pp)
+        ranked_fe2rr = rank_cities(dataset, metric="fe2rr")["rows"]
+        self.assertEqual([r["city_key"] for r in ranked_fe2rr], ["harbor", "vale"])
+        self.assertAlmostEqual(ranked_fe2rr[0]["delta_pp"], 10.0)
+        self.assertAlmostEqual(ranked_fe2rr[1]["delta_pp"], -10.0)
+
+        ranked_rr2net = rank_cities(dataset, metric="rr2net", ascending=True)["rows"]
+        self.assertEqual([r["city_key"] for r in ranked_rr2net], ["harbor", "vale"])
+        self.assertAlmostEqual(ranked_rr2net[0]["delta_pp"], -5.0)
+        self.assertAlmostEqual(ranked_rr2net[1]["delta_pp"], 5.0)
+
+        projected = city_funnels(
+            dataset,
+            cities=["Harbor"],
+            columns=["city", "fe_sessions", "rr", "net", "fe2rr", "fe2rr_delta_pp", "rr2net", "rr2net_delta_pp"],
+        )["rows"][0]
+        self.assertEqual((projected["fe_sessions"], projected["rr"], projected["net"]), (800, 480, 360))
+        self.assertAlmostEqual(projected["fe2rr"], 0.6)
+        self.assertAlmostEqual(projected["fe2rr_delta_pp"], 10.0)
+        self.assertAlmostEqual(projected["rr2net"], 0.75)
+        self.assertAlmostEqual(projected["rr2net_delta_pp"], -5.0)
 
 
 if __name__ == "__main__":
