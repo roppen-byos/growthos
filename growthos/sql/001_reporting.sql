@@ -27,6 +27,15 @@ CREATE TABLE irf.facts (
     platform_link_ftu bigint CHECK (platform_link_ftu >= 0),
     platform_auto_ftu bigint CHECK (platform_auto_ftu >= 0),
     platform_cab_ftu bigint CHECK (platform_cab_ftu >= 0),
+    fe_sessions bigint CHECK (fe_sessions >= 0),
+    rr bigint CHECK (rr >= 0),
+    net bigint CHECK (net >= 0),
+    bike_rr bigint CHECK (bike_rr >= 0),
+    bike_net bigint CHECK (bike_net >= 0),
+    auto_rr bigint CHECK (auto_rr >= 0),
+    auto_net bigint CHECK (auto_net >= 0),
+    cab_rr bigint CHECK (cab_rr >= 0),
+    cab_net bigint CHECK (cab_net >= 0),
     PRIMARY KEY (month, city_key)
 );
 

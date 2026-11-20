@@ -139,6 +139,10 @@ class ContractTests(unittest.TestCase):
             entry = store["metrics"][m]
             self.assertEqual(entry["unit"], "count")
             self.assertEqual(entry["subject_unit"], "installations" if m == "installs" else "customers")
+        for m in ("fe_sessions", "rr", "bike_rr", "auto_rr", "cab_rr"):
+            self.assertEqual(store["metrics"][m]["subject_unit"], "sessions")
+        for m in ("net", "bike_net", "auto_net", "cab_net"):
+            self.assertEqual(store["metrics"][m]["subject_unit"], "rides")
         for m, (num_col, den_col) in RATIOS.items():
             entry = store["metrics"][m]
             self.assertEqual(entry["unit"], "fraction")
@@ -146,6 +150,9 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(entry["movement_unit"], "percentage_points")
             self.assertEqual((entry["numerator"], entry["denominator"]), (num_col, den_col))
         self.assertEqual(store["metrics"]["platform_link_ftu"]["service_membership"], ["Link"])
+        self.assertIn("Bike Rated by Women", store["metrics"]["bike_net"]["service_membership"])
+        self.assertIn("Demand metric", store["metrics"]["fe2rr"]["definition"])
+        self.assertIn("Fulfillment metric", store["metrics"]["rr2net"]["definition"])
 
         targets = store["targets"]
         self.assertEqual(set(targets), {
@@ -166,7 +173,8 @@ class ContractTests(unittest.TestCase):
             self.assertNotIn("decision_refs", entry)
             self.assertNotIn("decision_refs", defs[metric_id])
         self.assertFalse(defs["glossary_distinctions"]["svn"]["supported_in_v1"])
-        self.assertFalse(defs["glossary_distinctions"]["rr2net"]["supported_in_v1"])
+        self.assertFalse(defs["glossary_distinctions"]["ao"]["supported_in_v1"])
+        self.assertNotIn("rr2net", defs["glossary_distinctions"])
 
         bad_versioned = copy.deepcopy(store)
         bad_versioned["version"] = "1.0.0"
@@ -174,10 +182,12 @@ class ContractTests(unittest.TestCase):
             _load_metric_registry(json.dumps(bad_versioned))
         self.assertEqual(caught.exception.code, "SCHEMA")
 
-        bad_alias = copy.deepcopy(store)
-        bad_alias["metrics"]["platform_auto_ftu"]["aliases"].append("SVN")
-        with self.assertRaises(GrowthOSError):
-            _load_metric_registry(json.dumps(bad_alias))
+        for forbidden_alias in ("SVN", "AO"):
+            bad_alias = copy.deepcopy(store)
+            bad_alias["metrics"]["platform_auto_ftu"]["aliases"].append(forbidden_alias)
+            with self.assertRaises(GrowthOSError) as caught:
+                _load_metric_registry(json.dumps(bad_alias))
+            self.assertEqual(caught.exception.code, "SCHEMA")
 
         bad_ratio = copy.deepcopy(store)
         bad_ratio["metrics"]["r2n"]["denominator"] = "installs"

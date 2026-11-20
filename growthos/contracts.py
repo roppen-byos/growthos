@@ -16,15 +16,33 @@ VOLUMES = (
     "installs", "registrations", "platform_ftu", "platform_link_ftu",
     "platform_auto_ftu", "platform_cab_ftu",
 )
+# Additive all-customer funnel volumes stored in irf.facts and exposed in the
+# public metric catalogue alongside VOLUMES (DEC-033).
+FUNNEL_VOLUMES = (
+    "fe_sessions", "rr", "net",
+    "bike_rr", "bike_net", "auto_rr", "auto_net", "cab_rr", "cab_net",
+)
+PUBLIC_VOLUMES = (*VOLUMES, *FUNNEL_VOLUMES)
+# Backward-compatible checksum scope: existing stored months were hashed over the
+# original IRF fields only. Funnel columns do not rewrite those historic digests.
+CORE_FACT_FIELDS = {"month", "city_key", "city", "tier", "source_cities", *VOLUMES}
+FACT_FIELDS = {*CORE_FACT_FIELDS, *FUNNEL_VOLUMES}
 RATIOS = {
     "i2r": ("registrations", "installs"),
     "r2n": ("platform_ftu", "registrations"),
     "link_share": ("platform_link_ftu", "platform_ftu"),
     "auto_share": ("platform_auto_ftu", "platform_ftu"),
     "cab_share": ("platform_cab_ftu", "platform_ftu"),
+    "fe2rr": ("rr", "fe_sessions"),
+    "rr2net": ("net", "rr"),
+    "bike_rr2net": ("bike_net", "bike_rr"),
+    "auto_rr2net": ("auto_net", "auto_rr"),
+    "cab_rr2net": ("cab_net", "cab_rr"),
 }
 TIERS = ("T1", "T2", "T3")
 SOURCES = ("installs", "registrations", "ftu")
+FUNNEL_SOURCE = "funnel"
+ALL_SOURCES = (*SOURCES, FUNNEL_SOURCE)
 BUSINESS_TIMEZONE = "Asia/Kolkata"
 # Per fetch/read, not database retention limits.
 MAX_FACTS = 20_000
@@ -33,7 +51,6 @@ TOP_FIELDS = {"nonproduction", "months", "month_metadata", "facts"}
 METADATA_FIELDS = {
     "month", "extracted_at", "business_timezone", "source_reads",
 }
-FACT_FIELDS = {"month", "city_key", "city", "tier", "source_cities", *VOLUMES}
 REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}\Z")
 
 
@@ -112,12 +129,24 @@ def _digest(rows: list[dict]) -> str:
 
 
 def checksum(rows: list[dict], key=lambda r: (r["month"], r["city_key"])) -> str:
-    """Canonical SHA-256 of unordered rows, sorted by key first."""
-    return _digest(sorted(rows, key=key))
+    """Canonical SHA-256 of unordered fact rows, sorted by key first.
+
+    The digest deliberately covers only the original IRF fields. Funnel columns are
+    additive and must not rewrite the stored digests of months published before them.
+    """
+    projected = [
+        {field: row[field] for field in sorted(CORE_FACT_FIELDS)}
+        for row in sorted(rows, key=key)
+    ]
+    return _digest(projected)
 
 
 def reporting_schema_sql() -> str:
     return files("growthos").joinpath("sql/001_reporting.sql").read_text(encoding="utf-8")
+
+
+def funnel_metrics_sql() -> str:
+    return files("growthos").joinpath("sql/003_funnel_metrics.sql").read_text(encoding="utf-8")
 
 
 @dataclass(frozen=True)
@@ -144,17 +173,19 @@ def validate_metadata(raw: object, *, now: datetime | None = None) -> None:
     if value >= extracted.astimezone(zone).date().replace(day=1):
         reject("INCOMPLETE_MONTH", "Only ended calendar months may be fetched or reported.")
     reads = raw["source_reads"]
-    if not isinstance(reads, list) or len(reads) != len(SOURCES):
-        reject("PROVENANCE", "Each month needs Installs, Registrations and FTU read evidence.")
+    if not isinstance(reads, list) or len(reads) not in (len(SOURCES), len(ALL_SOURCES)):
+        reject("PROVENANCE", "Each month needs Installs, Registrations, FTU and optionally funnel read evidence.")
     seen = set()
     for read in reads:
         exact_fields(read, {"source", "month", "started_at", "completed_at"})
-        if read["source"] not in SOURCES or read["source"] in seen or read["month"] != raw["month"]:
+        if read["source"] not in ALL_SOURCES or read["source"] in seen or read["month"] != raw["month"]:
             reject("PROVENANCE", "Invalid or duplicate source read evidence.")
         seen.add(read["source"])
         started, completed = timestamp(read["started_at"]), timestamp(read["completed_at"])
         if started > completed or completed > extracted:
             reject("PROVENANCE", "Source read times must be ordered and no later than extraction completion.")
+    if seen not in (set(SOURCES), set(ALL_SOURCES)):
+        reject("PROVENANCE", "Source reads must cover Installs, Registrations and FTU, with funnel only as an additive fourth source.")
 
 
 def validate_data(raw: object, *, now: datetime | None = None) -> MonthlyData:
@@ -200,12 +231,20 @@ def validate_data(raw: object, *, now: datetime | None = None) -> MonthlyData:
             lineage_owner[source_key] = row["city_key"]
         grain.add(key)
         observed.add(row["month"])
-        for metric in VOLUMES:
+        for metric in (*VOLUMES, *FUNNEL_VOLUMES):
             value = row[metric]
             if value is not None and (type(value) is not int or not 0 <= value <= 2**63 - 1):
                 reject("COUNT", "Facts must be nonnegative 64-bit integer counts or unavailable.")
     if observed != set(months):
         reject("COVERAGE", "Each month needs observations; an empty query is not evidence of zero.")
+    funnel_months = {
+        row["month"] for row in facts
+        if any(row[metric] is not None for metric in FUNNEL_VOLUMES)
+    }
+    reads_by_month = {item["month"]: {read["source"] for read in item["source_reads"]} for item in metadata}
+    for value in funnel_months:
+        if FUNNEL_SOURCE not in reads_by_month[value]:
+            reject("PROVENANCE", "Funnel metrics require matching funnel source read evidence.")
     norm_facts = sorted(
         ({**r, "source_cities": sorted(r["source_cities"])} for r in facts),
         key=lambda r: (r["month"], r["city_key"]),
@@ -220,4 +259,4 @@ def validate_data(raw: object, *, now: datetime | None = None) -> MonthlyData:
         "month_metadata": norm_metadata,
         "facts": norm_facts,
     }
-    return MonthlyData(canonical_json(normalized), _digest(norm_facts))
+    return MonthlyData(canonical_json(normalized), checksum(norm_facts))

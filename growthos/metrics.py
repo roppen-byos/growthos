@@ -7,11 +7,26 @@ from importlib.resources import files
 import json
 from typing import Mapping
 
-from .contracts import RATIOS, VOLUMES, text
+from .contracts import PUBLIC_VOLUMES, RATIOS, VOLUMES, text
 from .errors import reject
 from .queries import RESOURCE as WAREHOUSE_RESOURCE, warehouse_queries
 
-ALL_METRICS = VOLUMES + tuple(RATIOS)
+ALL_METRICS = PUBLIC_VOLUMES + tuple(RATIOS)
+_SESSION_VOLUMES = {"fe_sessions", "rr", "bike_rr", "auto_rr", "cab_rr"}
+_RIDE_VOLUMES = {"net", "bike_net", "auto_net", "cab_net"}
+_SERVICE_MEMBERSHIP_VOLUMES = {
+    "platform_link_ftu", "bike_rr", "bike_net", "auto_rr", "auto_net", "cab_rr", "cab_net",
+}
+
+
+def _expected_subject_unit(metric_id: str) -> str:
+    if metric_id == "installs":
+        return "installations"
+    if metric_id in _SESSION_VOLUMES:
+        return "sessions"
+    if metric_id in _RIDE_VOLUMES:
+        return "rides"
+    return "customers"
 
 
 @dataclass(frozen=True)
@@ -226,11 +241,11 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
     for metric_id, entry in metrics.items():
         if not isinstance(entry, dict) or entry.get("id") != metric_id:
             reject("SCHEMA", "Metric registry entry ID mismatch.")
-        if metric_id in VOLUMES:
-            allowed = _VOLUME_FIELDS | ({"service_membership"} if metric_id == "platform_link_ftu" else set())
+        if metric_id in PUBLIC_VOLUMES:
+            allowed = _VOLUME_FIELDS | ({"service_membership"} if metric_id in _SERVICE_MEMBERSHIP_VOLUMES else set())
             if set(entry) != allowed or entry.get("kind") != "volume" or entry.get("unit") != "count":
                 reject("SCHEMA", "Volume metric registry entry has unexpected fields or unit.")
-            expected_subject = "installations" if metric_id == "installs" else "customers"
+            expected_subject = _expected_subject_unit(metric_id)
             if (
                 entry.get("subject_unit") != expected_subject
                 or entry.get("display_unit") != expected_subject
@@ -238,7 +253,7 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
             ):
                 reject("SCHEMA", "Volume metric subject or display unit mismatch.")
             if "service_membership" in entry and not _string_list(entry["service_membership"], max_len=80):
-                reject("SCHEMA", "Invalid Bike/Link service_membership list in metric registry.")
+                reject("SCHEMA", "Invalid service_membership list in metric registry.")
         else:
             num_col, den_col = RATIOS[metric_id]
             if (
@@ -261,7 +276,7 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
             reject("SCHEMA", "Metric registry text, aliases, or caveats are invalid.")
         for token in [metric_id, entry["label"], *entry["aliases"]]:
             norm = token.strip().lower()
-            if norm in {"svn", "service ftu", "rr2net", "net rides", "net customers"}:
+            if norm in {"svn", "service ftu", "ao", "app opens", "net customers"}:
                 reject("SCHEMA", "Metric registry alias collides with an excluded or distinct glossary term.")
         for alias in entry["aliases"]:
             norm_alias = alias.strip().lower()
@@ -342,12 +357,12 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
         ):
             reject("SCHEMA", "Invalid warehouse query metric mapping in metric registry.")
         covered.extend(entry["metrics"])
-    if len(covered) != len(VOLUMES) or set(covered) != set(VOLUMES):
-        reject("SCHEMA", "Warehouse queries must cover each volume metric exactly once and no ratio metric.")
+    if len(covered) != len(PUBLIC_VOLUMES) or set(covered) != set(PUBLIC_VOLUMES):
+        reject("SCHEMA", "Warehouse queries must cover each public volume metric exactly once and no ratio metric.")
 
     glossary = payload["glossary_distinctions"]
-    if not isinstance(glossary, dict) or set(glossary) != {"svn", "rr2net"}:
-        reject("SCHEMA", "Metric registry glossary_distinctions must define svn and rr2net.")
+    if not isinstance(glossary, dict) or set(glossary) != {"svn", "ao"}:
+        reject("SCHEMA", "Metric registry glossary_distinctions must define svn and ao.")
     for item in glossary.values():
         if (
             not isinstance(item, dict)
@@ -407,7 +422,7 @@ def compare_pair(
     ratios: dict[str, RatioComparison] = {}
     with localcontext() as context:
         context.prec = 40
-        for metric in VOLUMES:
+        for metric in PUBLIC_VOLUMES:
             a, b = before.get(metric), after.get(metric)
             delta = None if a is None or b is None else b - a
             volumes[metric] = VolumeComparison(a, b, delta, number(quotient(delta, a)))
@@ -423,7 +438,7 @@ def compare_pair(
 def aggregate_observations(rows: list[dict], expected_cities: set[str]) -> dict[str, AggregateObservation]:
     missing_rows = len(expected_cities - {r["city_key"] for r in rows})
     result: dict[str, AggregateObservation] = {}
-    for metric in VOLUMES:
+    for metric in PUBLIC_VOLUMES:
         observed = sum(row[metric] is not None for row in rows)
         unavailable = missing_rows + sum(row[metric] is None for row in rows)
         subtotal = sum(row[metric] for row in rows if row[metric] is not None)
@@ -442,12 +457,12 @@ def compare_groups(
 ) -> tuple[dict[str, GroupVolumeComparison], dict[str, GroupRatioComparison]]:
     """Compare aggregate values, retaining coverage and known-subtotal evidence."""
     scalar_volumes, scalar_ratios = compare_pair(
-        {m: before[m].value for m in VOLUMES},
-        {m: after[m].value for m in VOLUMES},
+        {m: before[m].value for m in PUBLIC_VOLUMES},
+        {m: after[m].value for m in PUBLIC_VOLUMES},
     )
     subtotal_volumes, subtotal_ratios = compare_pair(
-        {m: before[m].known_subtotal if before[m].observed_city_count else None for m in VOLUMES},
-        {m: after[m].known_subtotal if after[m].observed_city_count else None for m in VOLUMES},
+        {m: before[m].known_subtotal if before[m].observed_city_count else None for m in PUBLIC_VOLUMES},
+        {m: after[m].known_subtotal if after[m].observed_city_count else None for m in PUBLIC_VOLUMES},
     )
     volumes: dict[str, GroupVolumeComparison] = {}
     ratios: dict[str, GroupRatioComparison] = {}

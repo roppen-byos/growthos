@@ -61,3 +61,51 @@ SELECT canonical_city_key,
 FROM mapped
 GROUP BY canonical_city_key
 ORDER BY canonical_city_key
+
+-- name: funnel-monthly
+-- metrics: fe_sessions, rr, net, bike_rr, bike_net, auto_rr, auto_net, cab_rr, cab_net
+WITH rf AS (
+    SELECT date_trunc('day', date(day)) AS time_value,
+           customerid,
+           city,
+           CAST(max(fe_sessions_unique_daily) AS double) AS fe,
+           CAST(sum(rr_sessions_unique_daily) AS double) AS rr,
+           CAST(sum(net_rides_daily) AS double) AS net,
+           CAST(sum(CASE WHEN service_name IN ('Link', 'Bike Pink', 'Bike Metro', 'Scooty', 'Bike Rated by Women', 'Bike Lite') THEN rr_sessions_unique_daily END) AS double) AS bike_rr,
+           CAST(sum(CASE WHEN service_name IN ('Link', 'Bike Pink', 'Bike Metro', 'Scooty', 'Bike Rated by Women', 'Bike Lite') THEN net_rides_daily END) AS double) AS bike_net,
+           CAST(sum(CASE WHEN service_name IN ('Auto', 'Auto Lite', 'Auto Pet', 'Auto Pool', 'Auto Priority', 'AutoPremium') THEN rr_sessions_unique_daily END) AS double) AS auto_rr,
+           CAST(sum(CASE WHEN service_name IN ('Auto', 'Auto Lite', 'Auto Pet', 'Auto Pool', 'Auto Priority', 'AutoPremium') THEN net_rides_daily END) AS double) AS auto_net,
+           CAST(sum(CASE WHEN service_name IN ('CabEconomy', 'CabPremium', 'Cab Premium - Intercity', 'Cab AC - Airport', 'Cab AC Sedan - Airport', 'Cab SUV', 'Cab Premium - Airport', 'Cab AC Sedan', 'Cab Daily', 'Cab Economy - Intercity', 'CabAC', 'Cab Priority', 'Cab SUV - Airport', 'Cab SUV - Intercity', 'Cab Economy - Airport', 'Cab Premium Biz') THEN rr_sessions_unique_daily END) AS double) AS cab_rr,
+           CAST(sum(CASE WHEN service_name IN ('CabEconomy', 'CabPremium', 'Cab Premium - Intercity', 'Cab AC - Airport', 'Cab AC Sedan - Airport', 'Cab SUV', 'Cab Premium - Airport', 'Cab AC Sedan', 'Cab Daily', 'Cab Economy - Intercity', 'CabAC', 'Cab Priority', 'Cab SUV - Airport', 'Cab SUV - Intercity', 'Cab Economy - Airport', 'Cab Premium Biz') THEN net_rides_daily END) AS double) AS cab_net
+    FROM hive.datasets.customer_rf_daily_kpi_old_ct
+    WHERE day >= ? AND day < ?
+    GROUP BY 1,2,3
+), city_month AS (
+    SELECT CASE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') WHEN 'guntur' THEN 'vijayawada' WHEN 'faridabad' THEN 'delhi' WHEN 'attingal' THEN 'trivandrum' ELSE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') END AS canonical_city_key,
+           coalesce(nullif(trim(city), ''), 'city_not_found') AS source_city,
+           CAST(coalesce(sum(fe), 0) AS bigint) AS fe_sessions,
+           CAST(coalesce(sum(rr), 0) AS bigint) AS rr,
+           CAST(coalesce(sum(net), 0) AS bigint) AS net,
+           CAST(coalesce(sum(bike_rr), 0) AS bigint) AS bike_rr,
+           CAST(coalesce(sum(bike_net), 0) AS bigint) AS bike_net,
+           CAST(coalesce(sum(auto_rr), 0) AS bigint) AS auto_rr,
+           CAST(coalesce(sum(auto_net), 0) AS bigint) AS auto_net,
+           CAST(coalesce(sum(cab_rr), 0) AS bigint) AS cab_rr,
+           CAST(coalesce(sum(cab_net), 0) AS bigint) AS cab_net
+    FROM rf
+    GROUP BY 1,2
+)
+SELECT canonical_city_key,
+       min(source_city) AS sample_source_city,
+       sum(fe_sessions) AS fe_sessions,
+       sum(rr) AS rr,
+       sum(net) AS net,
+       sum(bike_rr) AS bike_rr,
+       sum(bike_net) AS bike_net,
+       sum(auto_rr) AS auto_rr,
+       sum(auto_net) AS auto_net,
+       sum(cab_rr) AS cab_rr,
+       sum(cab_net) AS cab_net
+FROM city_month
+GROUP BY canonical_city_key
+ORDER BY canonical_city_key

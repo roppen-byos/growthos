@@ -1,8 +1,9 @@
-"""Granular same-month FTU target-gap investigation by registration volume (DEC-028).
+"""Granular same-month FTU & Registration target investigation (DEC-028, DEC-034).
 
 Calculation-only: no database, filesystem or CLI access. Every scope uses the same
-stored target row and the same month's facts, and the priority decision uses exact
-rational arithmetic; floats exist only for presentation.
+stored target row and the same month's facts; the material Registration target-miss
+verdict uses exact integer arithmetic (`20 * reg_gap < -reg_target`), and accounting
+context uses exact rational arithmetic; floats exist only for presentation.
 """
 
 from fractions import Fraction
@@ -17,29 +18,30 @@ from .evidence import (
 from .metrics import target_attainment
 from .targets import TargetMonth
 
-PRIORITY = Fraction(7, 10)
 MEMBER_PAGE_SIZE = 25
 
 METHOD = {
-    "comparison": "registration_effect / ftu_target_gap",
+    "verdict_rule": "reg_gap / reg_target < -5% (exact integer test: 20 * reg_gap < -reg_target)",
+    "threshold_comparison": "strictly_below_negative_5_percent",
     "ftu_target_gap": "platform_ftu_actual - platform_ftu_target",
+    "reg_target_gap": "registrations_actual - registrations_target",
     "target_ratio": "platform_ftu_target / registrations_target",
     "expected_ftu": "registrations_actual * target_ratio",
     "registration_effect": "expected_ftu - platform_ftu_target",
-    "priority_threshold_pct": 70,
-    "threshold_comparison": "strictly_greater_than",
-    "arithmetic": "exact rational; float fields are presentation only",
+    "comparison": "registration_effect / ftu_target_gap (accounting context)",
+    "arithmetic": "exact integer verdict and exact rational context; float fields are presentation only",
     "interpretation": (
-        "Target accounting split only. It does not show that registrations caused the FTU gap, "
-        "and the unexplained remainder is not attributed to any other cause."
+        "Same-month Registration target-miss check with target-accounting context. It does not "
+        "show that registrations caused the FTU gap, and the unexplained remainder is not "
+        "attributed to any other cause."
     ),
 }
 
 THRESHOLDS = {
-    "registration_priority_above_pct": 70,
+    "registration_miss_below_pct": -5,
     "ftu_miss": "ftu_target_gap < 0",
     "shortlist_rule": "unchanged; variance < -5 percent of own positive target",
-    "registration_miss_gate": "none",
+    "funnel_gate": "none; runs independently alongside funnel investigation for FTU target misses and on direct request",
 }
 
 
@@ -79,7 +81,7 @@ def _account(ftu_target, ftu_actual, reg_target, reg_actual) -> dict:
 
 
 def _verdict(state: dict) -> tuple[str, str | None, list[str]]:
-    """Apply the DEC-028 decision order; the first matching condition wins."""
+    """Apply the DEC-034 decision order; the first matching condition wins."""
     if not state["stored"]:
         return "undetermined", "no_stored_month", []
     if not state["ftu_imported"]:
@@ -114,12 +116,12 @@ def _verdict(state: dict) -> tuple[str, str | None, list[str]]:
         return "not_applicable", "ftu_target_met", []
     if state["_contribution"] is None:
         return "undetermined", "contribution_unavailable", []
-    if state["_contribution"] <= 0:
-        return "no_registration_shortfall", "registration_effect_nonnegative", []
     flags = ["over_explained"] if state["_contribution"] > 1 else []
-    if state["_contribution"] > PRIORITY:
-        return "registration_priority", None, flags
-    return "other_factors_undetermined", "contribution_at_or_below_threshold", flags
+    if state["reg_gap"] >= 0:
+        return "no_registration_shortfall", "registration_target_met", flags
+    if 20 * state["reg_gap"] < -state["reg_target"]:
+        return "registration_issue", None, flags
+    return "no_material_registration_miss", "registration_variance_within_5_percent", flags
 
 
 def _public(operands: dict) -> dict:
@@ -187,8 +189,8 @@ def _coverage(rows: list[dict], fields: tuple[str, str]) -> dict:
 
 def _compact_member(block: dict) -> dict:
     return {key: block[key] for key in (
-        "city", "city_key", "ftu_gap", "registration_effect", "contribution_pct",
-        "verdict", "reason")}
+        "city", "city_key", "ftu_gap", "reg_gap", "reg_gap_pct",
+        "registration_effect", "contribution_pct", "verdict", "reason")}
 
 
 def _member_operands(fact: dict | None, target_row: dict | None) -> dict:

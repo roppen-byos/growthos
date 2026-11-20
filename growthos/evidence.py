@@ -32,6 +32,26 @@ TIER_EXCLUDED_WARNING = (
 INVESTIGATION_UNDETERMINED_WARNING = (
     "Unavailable operands make some scopes undetermined; null targets and null actuals are never treated as zero."
 )
+FUNNEL_PROXY_WARNING = (
+    "FE sessions, RR and Net in irf.facts cover all customers (not an FTU-eligible-only cohort); "
+    "stage contributions apply city-wide relative changes to scaled Platform FTU as a proxy signal, "
+    "are evaluated independently and must not be summed."
+)
+FUNNEL_CALENDAR_SCALING_WARNING = (
+    "Volume counts for the longer month in a MoM pair are proportionally scaled to the shorter month's calendar length "
+    "(average daily run-rate adjustment, not literal removal of the extra calendar day); conversion rates are unaffected."
+)
+FUNNEL_OVER_EXPLAINED_WARNING = (
+    "Some funnel stages show an isolated counterfactual effect larger than the calendar-adjusted MoM FTU dip (over 100 percent); "
+    "other factors partly offset the dip. Primary stage contributions are non-additive."
+)
+FUNNEL_NATIONAL_MATCHED_WARNING = (
+    "National funnel diagnosis rolls up matched cities observed in both months per stage/metric so newly observed cities "
+    "do not distort MoM movement; excluded cities are disclosed in coverage."
+)
+FUNNEL_UNDETERMINED_WARNING = (
+    "Unavailable or nonpositive operands make some scopes or stages undetermined; null counts are never treated as zero."
+)
 CITY_PAGE_SIZE = 25
 
 
@@ -101,5 +121,5 @@ def catalog(dataset: MonthlyData, city_offset: int = 0) -> dict:
     del result["fact_count"]
     return {
         **result, **provenance(dataset),
-        "supported_operations": ["status", "compare", "rank", "funnel", "share-drivers", "warehouse-queries", "verify", "target-analysis", "target-facts", "investigate"],
+        "supported_operations": ["status", "compare", "rank", "funnel", "share-drivers", "warehouse-queries", "verify", "target-analysis", "target-facts", "investigate", "investigate-funnel"],
     }

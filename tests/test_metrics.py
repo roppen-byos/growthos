@@ -4,7 +4,7 @@ import json
 import unittest
 
 from growthos import analysis
-from growthos.contracts import VOLUMES, validate_data
+from growthos.contracts import PUBLIC_VOLUMES, validate_data
 from growthos.metrics import (
     AggregateObservation, GroupRatioComparison, GroupVolumeComparison,
     RatioComparison, VolumeComparison, aggregate_observations,
@@ -15,7 +15,7 @@ from fixtures import demo_data
 
 
 def counts(value, **overrides):
-    return {**dict.fromkeys(VOLUMES, value), **overrides}
+    return {**dict.fromkeys(PUBLIC_VOLUMES, value), **overrides}
 
 
 class MetricTests(unittest.TestCase):

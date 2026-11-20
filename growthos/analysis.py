@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from .classification import CANONICAL_CITIES
-from .contracts import RATIOS, TIERS, VOLUMES, MonthlyData, previous_month
+from .contracts import PUBLIC_VOLUMES, RATIOS, TIERS, MonthlyData, previous_month
 from .errors import reject
 # Preserve existing public imports; new callers use the owning modules.
 from .evidence import MISSING_TOTALS_WARNING, TIER_RECLASSIFIED_WARNING, catalog, provenance
@@ -503,7 +503,7 @@ def compare_overall(
         "unmapped_city_count": len({r["city_key"] for r in unmapped_rows}),
         "fallback_tier": "T3",
         "known_volumes_by_month": {
-            m: {metric: sum(r[metric] for r in unmapped_rows if r["month"] == m and r[metric] is not None) for metric in VOLUMES}
+            m: {metric: sum(r[metric] for r in unmapped_rows if r["month"] == m and r[metric] is not None) for metric in PUBLIC_VOLUMES}
             for m in (prev, curr)
         },
     }
@@ -543,7 +543,7 @@ def rank_cities(
     for meta, prev_row, curr_row in pairs:
         key, display, c_tier = meta["city_key"], meta["city"], meta["tier"]
         volumes, ratios = compare_pair(prev_row, curr_row)
-        if metric in VOLUMES:
+        if metric in PUBLIC_VOLUMES:
             volume = volumes[metric]
             movement = volume.absolute_delta if basis == "delta" else volume.growth_fraction
             latest_val = volume.latest
@@ -613,7 +613,7 @@ def rank_cities(
 _FUNNEL_FIELDS = {
     **{name: (None, None, name, "text") for name in ("city", "city_key", "tier")},
     **{f"{metric}{suffix}": ("volumes", metric, field, unit)
-       for metric in VOLUMES for suffix, field, unit in (
+       for metric in PUBLIC_VOLUMES for suffix, field, unit in (
            ("", "latest", "count"), ("_previous", "previous", "count"),
            ("_mom_abs", "absolute_delta", "count"), ("_mom_pct", "growth_fraction", "fraction"),
        )},
@@ -628,8 +628,8 @@ FUNNEL_COLUMNS = tuple(_FUNNEL_FIELDS)
 _FUNNEL_COLUMN_ALIASES = {
     **{c: c for c in FUNNEL_COLUMNS},
     **{f"{m}_latest": m for m in ALL_METRICS},
-    **{f"{m}_delta": f"{m}_mom_abs" for m in VOLUMES},
-    **{f"{m}_growth": f"{m}_mom_pct" for m in VOLUMES},
+    **{f"{m}_delta": f"{m}_mom_abs" for m in PUBLIC_VOLUMES},
+    **{f"{m}_growth": f"{m}_mom_pct" for m in PUBLIC_VOLUMES},
     **{f"{m}_delta": f"{m}_delta_pp" for m in RATIOS},
 }
 _SORT_SUFFIXES = {

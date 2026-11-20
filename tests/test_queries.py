@@ -5,7 +5,7 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from growthos.cli import main
-from growthos.contracts import RATIOS, VOLUMES
+from growthos.contracts import PUBLIC_VOLUMES, RATIOS
 from growthos.errors import GrowthOSError
 from growthos.metrics import _load_metric_registry, definitions, metric_registry
 from growthos.queries import (
@@ -16,15 +16,21 @@ from growthos.queries import (
 class WarehouseQueryTests(unittest.TestCase):
     def test_packaged_queries_parse_with_metrics_and_checksums(self):
         queries = warehouse_queries()
-        self.assertEqual(tuple(queries), ("installs-monthly", "registrations-monthly", "ftu-monthly"))
+        self.assertEqual(tuple(queries), (
+            "installs-monthly", "registrations-monthly", "ftu-monthly", "funnel-monthly",
+        ))
         self.assertEqual(queries["installs-monthly"]["metrics"], ("installs",))
         self.assertEqual(queries["registrations-monthly"]["metrics"], ("registrations",))
         self.assertEqual(queries["ftu-monthly"]["metrics"], (
             "platform_ftu", "platform_link_ftu", "platform_auto_ftu", "platform_cab_ftu",
         ))
+        self.assertEqual(queries["funnel-monthly"]["metrics"], (
+            "fe_sessions", "rr", "net", "bike_rr", "bike_net", "auto_rr", "auto_net", "cab_rr", "cab_net",
+        ))
         self.assertIn("appsflyer.canonical_appsflyer_customer_install", query_sql("installs-monthly"))
         self.assertIn("entity.users_snapshot", query_sql("registrations-monthly"))
         self.assertIn("customer.customer_order_channel_attribution_master", query_sql("ftu-monthly"))
+        self.assertIn("hive.datasets.customer_rf_daily_kpi_old_ct", query_sql("funnel-monthly"))
         for entry in queries.values():
             self.assertEqual(len(entry["checksum"]), 64)
             self.assertNotIn("-- name:", entry["sql"])
@@ -32,10 +38,11 @@ class WarehouseQueryTests(unittest.TestCase):
 
     def test_queries_cover_each_volume_metric_once_and_no_ratio(self):
         covered = [m for entry in warehouse_queries().values() for m in entry["metrics"]]
-        self.assertEqual(len(covered), len(VOLUMES))
-        self.assertEqual(set(covered), set(VOLUMES))
+        self.assertEqual(len(covered), len(PUBLIC_VOLUMES))
+        self.assertEqual(set(covered), set(PUBLIC_VOLUMES))
         self.assertFalse(set(covered) & set(RATIOS))
         self.assertEqual(set(queries_for_metric("installs")), {"installs-monthly"})
+        self.assertEqual(set(queries_for_metric("fe_sessions")), {"funnel-monthly"})
         self.assertEqual(len(queries_for_metric("platform_cab_ftu")), 1)
 
     def test_registry_references_packaged_warehouse_queries(self):
@@ -77,14 +84,18 @@ class WarehouseQueryTests(unittest.TestCase):
         with patch("growthos.cli.connect_reader") as reader:
             code, output = self.invoke([])
             self.assertEqual(code, 0)
-            self.assertEqual(output["query_count"], 3)
+            self.assertEqual(output["query_count"], 4)
             self.assertEqual(output["resource"], RESOURCE)
             self.assertEqual([q["id"] for q in output["queries"]], [
-                "installs-monthly", "registrations-monthly", "ftu-monthly"])
+                "installs-monthly", "registrations-monthly", "ftu-monthly", "funnel-monthly"])
 
             code, output = self.invoke(["--metric", "installs"])
             self.assertEqual(code, 0)
             self.assertEqual([q["id"] for q in output["queries"]], ["installs-monthly"])
+
+            code, output = self.invoke(["--metric", "fe_sessions"])
+            self.assertEqual(code, 0)
+            self.assertEqual([q["id"] for q in output["queries"]], ["funnel-monthly"])
 
             code, output = self.invoke(["--id", "ftu-monthly"])
             self.assertEqual(code, 0)
@@ -93,6 +104,10 @@ class WarehouseQueryTests(unittest.TestCase):
                 "platform_ftu", "platform_link_ftu", "platform_auto_ftu", "platform_cab_ftu"])
 
             code, output = self.invoke(["--metric", "i2r"])
+            self.assertEqual(code, 2)
+            self.assertEqual(output["error"]["code"], "COVERAGE")
+
+            code, output = self.invoke(["--metric", "rr2net"])
             self.assertEqual(code, 2)
             self.assertEqual(output["error"]["code"], "COVERAGE")
 
@@ -107,7 +122,7 @@ class WarehouseQueryTests(unittest.TestCase):
         output["queries"][0]["sql"] = "Mutated"
         self.assertNotEqual(query_sql("installs-monthly"), "Mutated")
         metric_registry()["warehouse_queries"]["queries"].clear()
-        self.assertEqual(len(metric_registry()["warehouse_queries"]["queries"]), 3)
+        self.assertEqual(len(metric_registry()["warehouse_queries"]["queries"]), 4)
 
     def invoke(self, arguments):
         output = io.StringIO()

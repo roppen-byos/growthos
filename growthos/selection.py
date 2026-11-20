@@ -6,7 +6,9 @@ from fractions import Fraction
 from zoneinfo import ZoneInfo
 
 from .classification import normalize_city_key
-from .contracts import BUSINESS_TIMEZONE, TIERS, MonthlyData, month, month_range, next_month
+from .contracts import (
+    BUSINESS_TIMEZONE, MAX_MONTHS, TIERS, MonthlyData, month, month_range, next_month, previous_month,
+)
 from .errors import reject
 
 
@@ -105,6 +107,7 @@ INVESTIGATION_MAX_CITIES = 25
 INVESTIGATION_MAX_GROUPS = 5
 INVESTIGATION_MAX_GROUP_CITIES = 25
 INVESTIGATION_MAX_BLOCKS = 240
+FUNNEL_STAGES = ("fe", "fe2rr", "rr2net")
 
 
 def validate_target_facts_request(value: str, attainment: str, sort_by: str,
@@ -158,6 +161,49 @@ def investigation_block_count(months: list[str], cities: list[str], groups: list
                               tier: str | None, national: bool) -> int:
     per_month = int(bool(national)) + len(cities) + len(groups) + int(tier is not None)
     return per_month * len(months) + len(months)  # one pooled New launch block per month at most
+
+
+def validate_funnel_stages(stages: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
+    """Validate optional repeatable funnel stage filters; defaults to all three stages."""
+    if not stages:
+        return FUNNEL_STAGES
+    cleaned = []
+    for item in stages:
+        stage = (item or "").strip().lower()
+        if stage not in FUNNEL_STAGES:
+            reject("ARGUMENTS", "Stage must be one of fe, fe2rr, or rr2net.")
+        if stage in cleaned:
+            reject("ARGUMENTS", "Do not repeat a funnel stage.")
+        cleaned.append(stage)
+    return tuple(stage for stage in FUNNEL_STAGES if stage in cleaned)
+
+
+def validate_funnel_investigation_request(
+    value: str,
+    cities: list[str],
+    groups: list[tuple[str, list[str]]],
+    start: str | None,
+    end: str | None,
+    stages: list[str] | tuple[str, ...] | None = None,
+    *,
+    now=None,
+) -> tuple[list[str], list[str], tuple[str, ...]]:
+    """Bound funnel investigation selectors and resolve requested + prior-month reads."""
+    requested = validate_investigation_request(value, cities, groups, start, end, now=now)
+    selected_stages = validate_funnel_stages(stages)
+    required = sorted({item for current in requested for item in (previous_month(current), current)})
+    if len(required) > MAX_MONTHS:
+        reject(
+            "BOUNDS",
+            "Funnel investigation reads each selected month plus its prior month and is limited to twelve stored months; narrow --start/--end.",
+        )
+    return requested, required, selected_stages
+
+
+def funnel_investigation_block_count(months: list[str], cities: list[str], groups: list,
+                                     tier: str | None, national: bool) -> int:
+    per_month = int(bool(national)) + len(cities) + len(groups) + int(tier is not None)
+    return per_month * len(months)
 
 
 def select_target_facts(rows: list[dict], *, cities: list[str] | None,

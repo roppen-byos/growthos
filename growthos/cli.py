@@ -16,13 +16,25 @@ from .analysis import (
 from .contracts import month_range, previous_month, validate_data
 from .errors import DiagnosticStage, MAX_OUTPUT_BYTES, SafeParser, diagnostic_stage, execute_cli, reject
 from .evidence import provenance
+from .funnel_investigation import investigate_funnel
 from .investigation import investigate
 from .metrics import ALL_METRICS
 from .postgres import connect_reader
 from .queries import warehouse_output, warehouse_query_ids
-from .selection import INVESTIGATION_MAX_BLOCKS, investigation_block_count, parse_investigation_group
-from .selection import normalize_tier, validate_investigation_request, validate_target_request
-from .selection import TARGET_ATTAINMENTS, TARGET_FACT_SORTS, validate_target_facts_request
+from .selection import (
+    FUNNEL_STAGES,
+    INVESTIGATION_MAX_BLOCKS,
+    TARGET_ATTAINMENTS,
+    TARGET_FACT_SORTS,
+    funnel_investigation_block_count,
+    investigation_block_count,
+    normalize_tier,
+    parse_investigation_group,
+    validate_funnel_investigation_request,
+    validate_investigation_request,
+    validate_target_facts_request,
+    validate_target_request,
+)
 
 
 def _add_period_args(command: argparse.ArgumentParser) -> None:
@@ -32,7 +44,7 @@ def _add_period_args(command: argparse.ArgumentParser) -> None:
 
 TARGET_COMMANDS = ("target-analysis", "target-facts")
 PERIOD_COMMANDS = ("compare", "rank", "funnel", "share-drivers")
-COMMANDS = ("status", *PERIOD_COMMANDS, "warehouse-queries", "verify", *TARGET_COMMANDS, "investigate")
+COMMANDS = ("status", *PERIOD_COMMANDS, "warehouse-queries", "verify", *TARGET_COMMANDS, "investigate", "investigate-funnel")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -110,6 +122,17 @@ def parser() -> argparse.ArgumentParser:
     investigate_cmd.add_argument("--national", action="store_true", help="Grand Total target pair with observed actuals")
     investigate_cmd.add_argument("--start", help="first history month YYYY-MM; requires --end")
     investigate_cmd.add_argument("--end", help="last history month YYYY-MM; requires --start")
+
+    funnel_inv_cmd = commands.add_parser("investigate-funnel", command_name="investigate-funnel")
+    funnel_inv_cmd.add_argument("--month", required=True, help="explicit ended month, YYYY-MM")
+    funnel_inv_cmd.add_argument("--stage", action="append", default=[], choices=FUNNEL_STAGES,
+                                help="repeatable funnel stage (fe, fe2rr, rr2net); defaults to all three")
+    funnel_inv_cmd.add_argument("--city", action="append", default=[], help="repeatable city; each named city is one independent block")
+    funnel_inv_cmd.add_argument("--group", action="append", default=[], help='explicit group as "Label:City,City"; never inferred')
+    funnel_inv_cmd.add_argument("--tier", help="stored selected-month tier T1/T2/T3 aggregate")
+    funnel_inv_cmd.add_argument("--national", action="store_true", help="matched-city national MoM funnel aggregate")
+    funnel_inv_cmd.add_argument("--start", help="first history month YYYY-MM; requires --end")
+    funnel_inv_cmd.add_argument("--end", help="last history month YYYY-MM; requires --start")
 
     return root
 
@@ -189,6 +212,24 @@ def run(args) -> dict:
             if investigation_block_count(months, args.city, groups, tier, national) > INVESTIGATION_MAX_BLOCKS:
                 reject("BOUNDS", "Investigation exceeds the bounded block limit; narrow the months or selectors.")
             investigation = {"months": months, "groups": groups, "tier": tier, "national": national}
+    if args.command == "investigate-funnel":
+        with diagnostic_stage(DiagnosticStage.ARGUMENTS):
+            groups = [parse_investigation_group(item) for item in args.group]
+            tier = normalize_tier(args.tier)
+            months, required_months, stages = validate_funnel_investigation_request(
+                args.month, args.city, groups, args.start, args.end, args.stage,
+            )
+            national = args.national or not (args.city or groups or tier)
+            if funnel_investigation_block_count(months, args.city, groups, tier, national) > INVESTIGATION_MAX_BLOCKS:
+                reject("BOUNDS", "Funnel investigation exceeds the bounded block limit; narrow the months or selectors.")
+            investigation = {
+                "months": months,
+                "required_months": required_months,
+                "stages": stages,
+                "groups": groups,
+                "tier": tier,
+                "national": national,
+            }
     if args.command in TARGET_COMMANDS:
         with diagnostic_stage(DiagnosticStage.ARGUMENTS):
             normalize_tier(args.tier)
@@ -212,6 +253,12 @@ def run(args) -> dict:
                         reject("COVERAGE", "None of the requested months have stored actuals; no substitute was selected.")
                     dataset = store.load(loaded)
                     targets = {value: store.load_targets(value) for value in loaded if value in ftu_months}
+                elif args.command == "investigate-funnel":
+                    available = set(store.available_months())
+                    if not any(value in available for value in investigation["months"]):
+                        reject("COVERAGE", "None of the requested months have stored actuals; no substitute was selected.")
+                    loaded = [value for value in investigation["required_months"] if value in available]
+                    dataset = store.load(loaded)
                 elif args.command in TARGET_COMMANDS:
                     dataset, targets, previous_targets = load_target_context(store, args.month)
                 else:
@@ -224,6 +271,17 @@ def run(args) -> dict:
                         registrations_months=registrations_months, cities=args.city,
                         groups=investigation["groups"], tier=investigation["tier"],
                         national=investigation["national"],
+                    )
+                if args.command == "investigate-funnel":
+                    return investigate_funnel(
+                        dataset,
+                        requested_months=investigation["months"],
+                        available_months=available,
+                        cities=args.city,
+                        groups=investigation["groups"],
+                        tier=investigation["tier"],
+                        national=investigation["national"],
+                        stages=investigation["stages"],
                     )
                 if args.command == "target-analysis":
                     return target_cities(dataset, targets, args.month, mode=args.mode,

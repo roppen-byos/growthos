@@ -1,6 +1,6 @@
 ---
 name: growthos-irf-analysis
-description: "Answer GrowthOS IRF questions: PFTU target/actual lookup and attainment rankings, coverage-based target shortlists, registration-contribution investigation of FTU target gaps, master reports, ratio investigations, monthly trends, city rankings/funnels, service-share drivers, and data verification."
+description: "Answer GrowthOS IRF questions: master reports, MoM and period comparisons, ratio investigations, monthly trends, city rankings/funnels, Bike/Auto/Cab service-share drivers, ended-month PFTU target/actual lookups and coverage shortlists, offline warehouse SQL provenance, and stored-data verification."
 ---
 
 # GrowthOS IRF Analysis
@@ -9,76 +9,71 @@ description: "Answer GrowthOS IRF questions: PFTU target/actual lookup and attai
 
 Use this skill when the user asks for:
 
-- IRF master reports or completed-month trends, including quarterly views shown month by month.
-- Installs, Registrations, Platform FTU, I2R or R2N comparisons across all cities, tiers or selected cities.
-- City growth/decline rankings, funnel investigations, or Bike/Link, Auto and Cab service-share drivers.
-- Available reporting months, metric definitions, city coverage, or verification of current stored IRF data.
-- The warehouse source SQL behind a metric (`warehouse-queries`), with no database connection.
-- Ended-month Platform FTU targets versus actuals, city attainment/rankings, coverage shortlists or all material target misses.
+- IRF master reports, MoM/period comparisons, or completed-month trends (including three-month / quarterly views shown month by month).
+- Installs, Registrations, Platform FTU, I2R, R2N, FE sessions, RR, Net rides, FE2RR, RR2Net, or service RR/Net/RR2Net comparisons across all cities, tiers (`T1`–`T3`), or selected cities.
+- City growth/decline rankings, IRF funnel drilldowns, or Bike/Link, Auto, and Cab service-share drivers.
+- Ended-month Platform FTU target/actual lookups, attainment rankings, coverage shortlists, pooled New launch comparisons, or prior-month widening-miss (`persistent` / `new_miss`) annotations.
+- Available reporting months, metric definitions, city coverage, stored-data verification, or offline warehouse source SQL (`warehouse-queries`).
+
+For investigating **why** Platform FTU missed target or dipped MoM — including parallel `FE`, `FE2RR`, `RR2Net` funnel contribution and same-month `Registration` target contribution — load [the FTU investigation skill](../growthos-ftu-investigation/SKILL.md).
 
 ## Contract
 
-- Every reported number, ratio, ranking and warning comes from the reviewed `growthos` CLI; the model selects commands and data, then explains evidence without computing metrics.
-- Database access is strictly read-only over current stored ended calendar months. Analytical reports are delivered in chat.
-- Every answer states the selected period, month metadata/source-read times, unavailable values, and applicable coverage or mapping warnings.
+- **CLI-only arithmetic:** every reported number, ratio, delta, ranking, and warning comes from a reviewed `growthos` subcommand. Select commands and explain evidence without hand-calculating metrics.
+- **Read-only, chat-only:** database access is strictly read-only over current stored ended calendar months. Deliver all reports in chat.
+- **Provenance & honesty:** every answer states the selected period, relevant month metadata/source-read times, unavailable values (`N/A` with reasons), and applicable coverage or mapping warnings.
 
 ## Workflow
 
-1. **Check boundaries and interpreter.** Apply repository-root [AGENTS.md](../../../AGENTS.md) for scope and credentials; consult [README.md](../../../README.md) for local setup. Run commands from the repository root with `.venv/bin/python`.
-2. **Inspect current availability.** Run `.venv/bin/python -m growthos status`. Record available months, the packaged metric catalogue (`metrics`, from `growthos/metric_registry.json`, including PFTU vs glossary-only SVN and R2N vs RR2Net), warnings, month metadata and source-read times.
-3. **Select periods and collect evidence.** Choose explicit months using the rules below, run matching commands from the router, and reuse returned JSON across follow-ups. For target questions, first load [target-analysis.md](target-analysis.md): choose facts or policy-based selection by intent, with supported filters, ordering, and first-page delivery with on-request continuation. Before interpreting a master report, highlighted I2R/R2N movement (even without a drilldown request), or quarterly/three-month analysis, complete the matching branch in [report-playbook.md](report-playbook.md).
-4. **Deliver the report in chat.** Done when requested evidence, output-format requirements, provenance/source-read caveats and applicable playbook completion checks are satisfied.
+1. **Check boundaries and interpreter.** Apply repository-root [AGENTS.md](../../../AGENTS.md) for scope, credentials, and CLI approval; use [README.md](../../../README.md) for local setup. Run commands from `gwos-analyst/` with `.venv/bin/python`.
+2. **Inspect current availability.** Run `.venv/bin/python -m growthos status` (skip for offline `warehouse-queries`, or when already verified in the current conversation). Note available months, metric definitions (`metrics`, including PFTU vs glossary-only SVN, glossary-only AO, and R2N vs all-customer RR2Net), warnings, and source-read times.
+3. **Select explicit periods and collect evidence.** Run the matching command(s) from the router below, passing explicit month flags across follow-up calls so multi-command answers stay aligned, and verify `result_checksum` and month metadata remain consistent across reads (rerun affected commands if a refresh occurred mid-analysis).
+   - **Target questions (`target-facts`, `target-analysis`):** load [target-analysis.md](target-analysis.md) first for intent routing, filters, sorting, pooled fallback, widening misses, and first-page-then-ask pagination.
+   - **Master reports, highlighted I2R/R2N movements (even without a drilldown ask), or three-month/quarterly views:** complete the matching branch in [report-playbook.md](report-playbook.md) before interpreting.
+   - **Custom flat funnel columns or units:** read [funnel-columns.md](funnel-columns.md).
+   - **Warehouse SQL provenance:** read [metric-provenance.md](metric-provenance.md).
+4. **Format and deliver in chat.** Before composing any analytical answer, read [output-format.md](output-format.md). Done only when every required CLI check, playbook/target rule, formatting requirement, and provenance/caveat disclosure is satisfied.
 
-## Tools and command routing
+## Command router
 
-Commands follow `.venv/bin/python -m growthos`. Use `<command> --help` for exact flags, defaults, and allowed values. Analytical comparisons and `verify` default to the latest two stored months.
+Prefix every command with `.venv/bin/python -m growthos`. Use `<command> --help` for exact flags, defaults, and allowed values. Period commands (`compare`, `rank`, `funnel`, `share-drivers`) and `verify` default to the latest two stored months.
 
 | User asks | Command |
 | --- | --- |
-| Stored months, metrics, cities | `status [--city-offset N]` |
-| Warehouse SQL behind a metric | `warehouse-queries [--metric METRIC] [--id QUERY-ID]`; read [metric-provenance.md](metric-provenance.md) |
-| Overall MoM / period comparison (`i2r`, `r2n`, shares) | `compare [--previous YYYY-MM --latest YYYY-MM]` |
+| Stored months, metric definitions, cities | `status [--city-offset N]` |
+| Warehouse SQL behind stored volume metrics (IRF + funnel) | `warehouse-queries [--metric METRIC] [--id QUERY-ID]`; read [metric-provenance.md](metric-provenance.md) |
+| Overall MoM or period comparison (`i2r`, `r2n`, `fe2rr`, `rr2net`, shares) | `compare [--previous YYYY-MM --latest YYYY-MM]` |
 | Tier breakdown (`T1`, `T2`, `T3`) | `compare --group-by tier [--tier T1\|T2\|T3]` |
-| Key / selected city MoM comparison | `compare --group-by city [--city City ...] [--top 25]` |
-| Top N cities by metric growth or decline | `rank --metric platform_ftu --top 20 [--tier T3] [--ascending]` |
-| Funnel drilldown for top or selected cities | `funnel --top 10 [--tier T2] [--city City ...] [--sort platform_ftu_delta]` |
-| Auto / Cab / Bike/Link share drivers | `share-drivers --service auto\|cab\|link\|all [--top 15] [--tier T1]` |
+| Selected or top-N city MoM comparison | `compare --group-by city [--city CITY ...] [--top 25]` |
+| Top-N cities by metric growth or decline | `rank --metric platform_ftu --top 20 [--tier T3] [--ascending]` |
+| IRF funnel drilldown for top or selected cities | `funnel --top 10 [--tier T2] [--city CITY ...] [--sort platform_ftu_delta]` |
+| Bike/Link, Auto, or Cab share drivers | `share-drivers --service auto\|cab\|link\|all [--top 15] [--tier T1]` |
 | Verify current data and stored checksums | `verify [--start YYYY-MM --end YYYY-MM]` |
-| Platform FTU target misses: top coverage shortlist or all qualifying cities | `target-analysis --month YYYY-MM --mode top\|all`; first read [target-analysis.md](target-analysis.md) |
-| Pooled New launch fallback comparison (separate from matched, ask first) | `target-analysis --month YYYY-MM --tier T1\|T2\|T3 --queue fallback`; first read [target-analysis.md](target-analysis.md) |
-| Target/actual lookup, cities above/at/below target, factual attainment ordering | `target-facts --month YYYY-MM [--city CITY ...]`; first read [target-analysis.md](target-analysis.md) |
-| Tier-specific target facts or cities covering a tier's own gap | Add `--tier T1\|T2\|T3` to the selected target tool; first read [target-analysis.md](target-analysis.md) |
-| Explain a same-month FTU target gap by registration volume (city, tier, group, national, month history) | `investigate --month YYYY-MM [--city CITY ...] [--tier T1\|T2\|T3] [--group "Label:City,City"] [--national] [--start YYYY-MM --end YYYY-MM]`; first read [target-analysis.md](target-analysis.md#registration-contribution-investigation) |
-| Cities whose target miss widened >5pp last month (persistent or new) | Returned additively by either target tool; read `persistent_failure`, check `status`, and render a second table per [target-analysis.md](target-analysis.md) |
-
-For projected funnel columns or units, read [funnel-columns.md](funnel-columns.md).
+| PFTU target misses: coverage shortlist or all qualifying (`>5%`) cities | `target-analysis --month YYYY-MM --mode top\|all [--tier T1\|T2\|T3]`; read [target-analysis.md](target-analysis.md) |
+| Pooled New launch fallback breakdown (opt-in; disclose count and ask first) | `target-analysis --month YYYY-MM [--tier T1\|T2\|T3] --queue fallback`; read [target-analysis.md](target-analysis.md) |
+| Target/actual lookup, cities above/at/below target, factual attainment sorting | `target-facts --month YYYY-MM [--city CITY ...] [--tier T1\|T2\|T3]`; read [target-analysis.md](target-analysis.md) |
+| Widening target misses vs prior month (`< -5pp`, `persistent` / `new_miss`) | Returned additively as `persistent_failure` by `target-analysis` and `target-facts`; render as a second table per [target-analysis.md](target-analysis.md) |
+| Investigate why FTU missed target or dipped MoM (`FE`, `FE2RR`, `RR2Net`, or `Registration` contribution) | Load [the FTU investigation skill](../growthos-ftu-investigation/SKILL.md) (`investigate-funnel`, `investigate`) |
 
 ## Interpretation and gotchas
 
-- Pass explicit month pairs across follow-up queries. Each command reads consistently, but refreshes overwrite stored months in place — there is no snapshot pinning or time travel. If checksums or month metadata change mid-investigation, rerun affected commands. Honor requested months; label nonadjacent pairs a `period comparison`, not `MoM`.
-- Cities absent from the canonical classification are reported under `T3` and included in overall totals; `mapping_impact` reports the count and stored volumes those unmapped cities contributed. Paired comparisons group cities by their latest observed tier within the pair and warn on cross-month tier changes. Missing operands or zero denominators stay `null`, never `0`.
-- Stored ended months are immediately reportable without certification labels; retained months are fetched independently without cross-month pinning. Distinguish IRF arithmetic from causal hypotheses.
-
-## Output format
-
-Before composing any analytical answer, read [output-format.md](output-format.md) for structure, question-sized layouts, tables, numeric display and evidence notes.
+- **Explicit periods, no pinning:** pass explicit `--previous`/`--latest` or `--month` flags across follow-ups. Refreshes overwrite stored months in place with no snapshot pinning or time travel. Honor requested months without silent substitution; label nonadjacent pairs a **period comparison**, not **MoM**.
+- **Tiers and unmapped cities:** unmapped cities are assigned to `T3` and included in overall totals; cite `mapping_impact` for their count and volume contribution. Paired comparisons group each city by its latest observed tier in the pair and warn when tiers changed across months.
+- **Missing data and zeros:** keep `null` observations and zero-denominator ratios as `N/A` with their supplied reason, and label `known_subtotal*` values explicitly as partial subtotals — never complete totals.
+- **Availability vs completeness:** stored ended months are immediately reportable without certification labels; source-read timestamps record query execution, not authoritative business-data cutoffs.
+- **Guardrails (always prefer the reviewed CLI path):**
+  - Use reviewed `growthos` subcommands instead of ad-hoc `python3 -c`, pandas, or hand math so count-rollup-before-division, completeness checks, and latest-tier pairing stay exact.
+  - Take aggregate ratios from `compare` and keep multi-month views side by side; never average city ratios, sum `pp` deltas, or sum monthly distinct counts into a quarterly distinct total.
+  - Report measured count and ratio movements; frame marketing, CRM, pricing, or supply explanations only as unverified hypotheses.
 
 ## When it fails
 
 CLI failures return `{"error": {"code": "...", "message": "..."}}` with sanitized messages. Recover by code class:
 
-- `CONFIGURATION`, `DEPENDENCY`, `DATABASE_UNAVAILABLE`: report only the CLI's sanitized error and point to setup steps in [README.md](../../../README.md); never read/modify `.env`, request secrets in chat, or invent numbers.
-- `ARGUMENTS`: inspect `<subcommand> --help`, fix the flag or allowed enum value, and rerun.
-- `COVERAGE`, `PERIOD`, `MONTH`, `INCOMPLETE_MONTH`, `CITY`: state the exact missing or invalid month/city from `status`, keep the user's requested scope explicit, and offer available stored periods without silent substitution.
-- `READ_ONLY_ROLE`, `TLS`, `STORE_INTEGRITY`, `SCHEMA`, `PROVENANCE`: stop the analysis immediately and surface the sanitized blocker; never attempt to bypass role, TLS, or checksum guards.
-- `OUTPUT_BOUND`, `BOUNDS`: narrow the month window or `--top`/`--tier`/`--city` filter and disclose the narrower scope.
-- Partial coverage or `null` metrics in valid JSON: continue with observed evidence, cite `known_subtotal*` and unavailable counts where provided, and render missing values as `N/A`.
-- `TARGETS_UNAVAILABLE` or `TARGETS`: report the target-data limitation and requested month; existing MoM analysis remains separate. Table installation/correction is an administrator task, not an analyst action.
-
-## Anti-patterns
-
-- **Ad-hoc math (`python3 -c`, pandas, hand-computed ratios/totals)** -> run the reviewed `growthos` subcommand so rollup before division, completeness checks, and latest-tier pairing hold.
-- **Averaging city ratios, summing `pp` deltas, or summing monthly distincts into a quarter** -> take aggregate ratios from `compare` and keep three-month views as side-by-side monthly observations ([report-playbook.md](report-playbook.md)).
-- **Treating `null` or missing city-months as `0`, or `known_subtotal` as complete** -> keep `null` as `N/A` and label partial subtotals with their unavailable counts.
-- **Asserting marketing, CRM, or marketplace causes from funnel arithmetic** -> report measured count/ratio movements and label operational explanations as unverified hypotheses.
-- **Silent period substitution** -> fail closed when requested months are absent.
+- `CONFIGURATION`, `DEPENDENCY`, `DATABASE_UNAVAILABLE`: report only the CLI's sanitized error and direct the user to [the setup skill](../growthos-setup/SKILL.md) or [README.md](../../../README.md); never read/modify `.env`, ask for secrets in chat, or invent numbers.
+- `ARGUMENTS`: inspect `<subcommand> --help`, fix the flag or allowed value, and rerun.
+- `COVERAGE`, `PERIOD`, `MONTH`, `INCOMPLETE_MONTH`, `CITY`: state the exact missing or invalid month/city from `status`, keep the requested scope explicit, and offer available stored periods without silent substitution.
+- `READ_ONLY_ROLE`, `TLS`, `STORE_INTEGRITY`, `SCHEMA`, `PROVENANCE`: stop immediately and surface the sanitized blocker; never bypass role, TLS, or checksum guards.
+- `OUTPUT_BOUND`, `BOUNDS`: narrow the month window or `--top`/`--limit`/`--tier`/`--city` filter and disclose the narrower scope.
+- `TARGETS_UNAVAILABLE`, `TARGETS`: report the target-data limitation for the requested month; core MoM analysis remains separate, and target installation/correction is an administrator task.
+- Partial coverage or `null` metrics in valid JSON: proceed with observed evidence, cite `known_subtotal*` and unavailable counts where provided, and render missing values as `N/A`.
