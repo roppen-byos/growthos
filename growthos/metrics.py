@@ -231,8 +231,16 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
         )
     except (OSError, ValueError):
         reject("SCHEMA", "Packaged metric registry is unreadable or invalid JSON.")
-    if not isinstance(payload, dict) or set(payload) != {"metrics", "movements", "targets", "warehouse_queries", "glossary_distinctions", "rules"}:
+    if not isinstance(payload, dict) or set(payload) != {"metrics", "movements", "targets", "warehouse_queries", "excluded_aliases", "glossary_distinctions", "rules"}:
         reject("SCHEMA", "Metric registry top-level keys do not match the approved store shape.")
+    excluded_aliases = payload["excluded_aliases"]
+    if (
+        not _string_list(excluded_aliases, max_len=80)
+        or len(set(excluded_aliases)) != len(excluded_aliases)
+        or any(alias != alias.strip().lower() for alias in excluded_aliases)
+    ):
+        reject("SCHEMA", "Metric registry excluded aliases must be unique lowercase terms.")
+    excluded = set(excluded_aliases)
     metrics = payload["metrics"]
     if not isinstance(metrics, dict) or tuple(metrics) != ALL_METRICS:
         reject("SCHEMA", "Metric registry must cover the exact V1 volume and ratio metrics in order.")
@@ -276,7 +284,7 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
             reject("SCHEMA", "Metric registry text, aliases, or caveats are invalid.")
         for token in [metric_id, entry["label"], *entry["aliases"]]:
             norm = token.strip().lower()
-            if norm in {"svn", "service ftu", "ao", "app opens", "net customers"}:
+            if norm in excluded:
                 reject("SCHEMA", "Metric registry alias collides with an excluded or distinct glossary term.")
         for alias in entry["aliases"]:
             norm_alias = alias.strip().lower()
@@ -361,8 +369,8 @@ def _load_metric_registry(raw_text: str | None = None) -> dict:
         reject("SCHEMA", "Warehouse queries must cover each public volume metric exactly once and no ratio metric.")
 
     glossary = payload["glossary_distinctions"]
-    if not isinstance(glossary, dict) or set(glossary) != {"svn", "ao"}:
-        reject("SCHEMA", "Metric registry glossary_distinctions must define svn and ao.")
+    if not isinstance(glossary, dict) or set(glossary) != {"sftu"}:
+        reject("SCHEMA", "Metric registry glossary_distinctions must define sftu.")
     for item in glossary.values():
         if (
             not isinstance(item, dict)

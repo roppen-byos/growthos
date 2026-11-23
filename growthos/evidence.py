@@ -33,24 +33,27 @@ INVESTIGATION_UNDETERMINED_WARNING = (
     "Unavailable operands make some scopes undetermined; null targets and null actuals are never treated as zero."
 )
 FUNNEL_PROXY_WARNING = (
-    "FE sessions, RR and Net in irf.facts cover all customers (not an FTU-eligible-only cohort); "
-    "stage contributions apply city-wide relative changes to scaled Platform FTU as a proxy signal, "
-    "are evaluated independently and must not be summed."
+    "FE sessions, RR and Net in irf.facts cover the FTU-eligible cohort (activity on or before each customer's "
+    "lifetime first completed platform ride plus Zero-Transaction customers with no completed ride yet, including "
+    "same-day activity on the first-ride day); stage contributions apply FTU-eligible session/ride relative changes "
+    "as hold-two-constant counterfactual proxies against the calendar-adjusted MoM Platform FTU dip. Counterfactual "
+    "effects drop interaction terms, so stage percentages need not sum to 100%; the > 70% primary cutoff ranks "
+    "> 20% contributors rather than forming an additive partition."
 )
 FUNNEL_CALENDAR_SCALING_WARNING = (
     "Volume counts for the longer month in a MoM pair are proportionally scaled to the shorter month's calendar length "
     "(average daily run-rate adjustment, not literal removal of the extra calendar day); conversion rates are unaffected."
 )
 FUNNEL_OVER_EXPLAINED_WARNING = (
-    "Some funnel stages show an isolated counterfactual effect larger than the calendar-adjusted MoM FTU dip (over 100 percent); "
-    "other factors partly offset the dip. Primary stage contributions are non-additive."
+    "Some funnel stages or services show an isolated effect larger than the dip (over 100 percent); "
+    "other factors partly offset the dip."
 )
 FUNNEL_NATIONAL_MATCHED_WARNING = (
     "National funnel diagnosis rolls up matched cities observed in both months per stage/metric so newly observed cities "
     "do not distort MoM movement; excluded cities are disclosed in coverage."
 )
 FUNNEL_UNDETERMINED_WARNING = (
-    "Unavailable or nonpositive operands make some scopes or stages undetermined; null counts are never treated as zero."
+    "Unavailable or nonpositive operands make some scopes, stages or services undetermined; null counts are never treated as zero."
 )
 CITY_PAGE_SIZE = 25
 

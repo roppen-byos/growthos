@@ -131,7 +131,8 @@ class ContractTests(unittest.TestCase):
         import json
 
         store = metric_registry()
-        self.assertEqual(set(store), {"metrics", "movements", "targets", "warehouse_queries", "glossary_distinctions", "rules"})
+        self.assertEqual(set(store), {"metrics", "movements", "targets", "warehouse_queries", "excluded_aliases", "glossary_distinctions", "rules"})
+        self.assertEqual(store["excluded_aliases"], ["sftu", "service ftu", "ao", "app opens", "net customers"])
         self.assertNotIn("version", store)
         self.assertNotIn("schema_version", store)
         self.assertEqual(tuple(store["metrics"]), ALL_METRICS)
@@ -172,8 +173,8 @@ class ContractTests(unittest.TestCase):
         for metric_id, entry in store["metrics"].items():
             self.assertNotIn("decision_refs", entry)
             self.assertNotIn("decision_refs", defs[metric_id])
-        self.assertFalse(defs["glossary_distinctions"]["svn"]["supported_in_v1"])
-        self.assertFalse(defs["glossary_distinctions"]["ao"]["supported_in_v1"])
+        self.assertFalse(defs["glossary_distinctions"]["sftu"]["supported_in_v1"])
+        self.assertNotIn("ao", defs["glossary_distinctions"])
         self.assertNotIn("rr2net", defs["glossary_distinctions"])
 
         bad_versioned = copy.deepcopy(store)
@@ -182,7 +183,7 @@ class ContractTests(unittest.TestCase):
             _load_metric_registry(json.dumps(bad_versioned))
         self.assertEqual(caught.exception.code, "SCHEMA")
 
-        for forbidden_alias in ("SVN", "AO"):
+        for forbidden_alias in ("SFTU", "AO"):
             bad_alias = copy.deepcopy(store)
             bad_alias["metrics"]["platform_auto_ftu"]["aliases"].append(forbidden_alias)
             with self.assertRaises(GrowthOSError) as caught:
