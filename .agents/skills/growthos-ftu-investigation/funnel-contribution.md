@@ -49,9 +49,11 @@ Use this reference whenever interpreting `.venv/bin/python -m growthos investiga
 
 ### Table formatting
 
-Render the historical funnel panel with these exact six columns:
+For full multi-stage funnel decomposition, render the historical funnel panel with these exact six columns:
 
 `City | Cal.-Adj. MoM FTU Dip | Primary Issues (>20%, cum. >70%) | FE Share of Dip | FE2RR Share of Dip | RR2Net Share of Dip`
+
+For direct single-city / single-stage service drilldowns (`--stage fe2rr` or `--stage rr2net`), render **one unified 6-column table** (`Scope | <previous> | <latest> | Change (pp) | Share of Dip | Verdict`) with a 1-line volume and rate-vs-mix summary directly below the table (omit a separate volume table unless raw counts were explicitly requested).
 
 Add one concise line directly above the table: `+` means the metric contributed to FTU improvement, cushioning the FTU fall; `−` means the metric pulled FTU down and deepened the fall. Each cell is that stage's **share of the FTU dip** — not the metric's growth rate — so display the reversed sign of the CLI `contribution_pct`: a positive `contribution_pct` (stage declined) renders as `−`, a negative `contribution_pct` (stage improved) renders as `+`, and exact zero renders `0.00%`. **Bold** = selected primary issue from `> 20%` stages until cumulative `> 70%`. Counterfactual percentages omit interaction terms, are not additive, and need not sum to 100%.
 
