@@ -3,8 +3,9 @@
 Calculation-only: no database, filesystem or CLI access. Evaluates FE sessions,
 FE2RR and RR2Net independently against a material (> 5%) calendar-adjusted MoM
 Platform FTU dip via hold-two-constant counterfactual proxies using exact rational
-arithmetic, then selects > 20% stages descending until cumulative contribution
-exceeds > 70%; floats are presentation only.
+arithmetic, selects > 20% stages descending until cumulative contribution
+exceeds > 70%, and checks calendar-adjusted MoM Registrations (> 5% dip) when
+FE is selected as a primary stage; floats are presentation only.
 """
 
 from __future__ import annotations
@@ -28,13 +29,14 @@ from .selection import FUNNEL_STAGES, validate_funnel_stages
 MATERIAL_THRESHOLD = Fraction(1, 5)
 CUMULATIVE_ISSUE_THRESHOLD = Fraction(7, 10)
 FTU_DIP_THRESHOLD = Fraction(-1, 20)
+REG_DIP_THRESHOLD = Fraction(-1, 20)
 STAGE_RANK = {"fe": 0, "fe2rr": 1, "rr2net": 2}
 MEMBER_PAGE_SIZE = 25
 
 METHOD = {
     "baseline": "immediately_previous_calendar_month",
     "calendar_adjustment": (
-        "Proportional shorter-month scaling: volume counts (Platform FTU, FE sessions, RR, Net) "
+        "Proportional shorter-month scaling: volume counts (Platform FTU, Registrations, FE sessions, RR, Net) "
         "in the longer month are scaled by min(prior_days, current_days) / month_days. "
         "Conversion rates FE2RR and RR2Net are unaffected."
     ),
@@ -52,6 +54,12 @@ METHOD = {
         "Filter stages strictly > 20%, sort descending by exact contribution, and select stages "
         "until cumulative contribution is strictly > 70% (if all > 20% stages sum <= 70%, keep "
         "all > 20% stages and mark primary_coverage_reached_70_pct: false)."
+    ),
+    "registration_check": (
+        "Triggered only when fe is in primary_stages: checks whether calendar-adjusted MoM "
+        "Registrations fell strictly > 5% ((current_reg_scaled - prior_reg_scaled) / prior_reg_scaled < -5%, "
+        "exact rational test). Independent of Step 1's same-month Registration target check; "
+        "missing or nonpositive registrations affect only registration_check and never block funnel stages."
     ),
     "threshold_comparison": "strictly_greater_than",
     "arithmetic": "exact rational; float fields are presentation only",
@@ -73,6 +81,8 @@ THRESHOLDS = {
     "cumulative_issue_above_pct": 70,
     "ftu_dip_below_pct": -5,
     "ftu_dip": "ftu_change / prior_ftu_scaled < -5% (strict)",
+    "registration_dip_below_pct": -5,
+    "registration_dip": "reg_change / prior_reg_scaled < -5% (strict; triggered only when fe is in primary_stages)",
     "registration_gate": "registration_target_shortfall_check_above_70_stops_before_funnel",
     "persistence_gate": "month_on_month_dip_persistence_check_persistent_prior_month_stops_before_funnel",
     "service_drilldown": "deferred_stop_at_platform_rr2net",
@@ -412,6 +422,69 @@ def _public_stage(item: dict, *, selected_as_primary: bool | None) -> dict:
     return cleaned
 
 
+def _evaluate_registration_check(
+    *,
+    triggered: bool,
+    prior_reg_raw: int | None,
+    curr_reg_raw: int | None,
+    prior_scale: Fraction,
+    curr_scale: Fraction,
+    override_reason: str | None = None,
+    blocking_keys: list[str] | None = None,
+) -> dict:
+    if not triggered:
+        return {
+            "triggered": False,
+            "prior_registrations_raw": None,
+            "current_registrations_raw": None,
+            "prior_registrations_scaled": None,
+            "current_registrations_scaled": None,
+            "registrations_change": None,
+            "registrations_change_pct": None,
+            "verdict": "not_triggered",
+            "reason": "fe_not_primary",
+            "blocking_city_keys": [],
+        }
+
+    p_scaled = _scale(prior_reg_raw, prior_scale)
+    c_scaled = _scale(curr_reg_raw, curr_scale)
+    reg_change = None if p_scaled is None or c_scaled is None else c_scaled - p_scaled
+    reg_change_frac = (
+        None if reg_change is None or p_scaled is None or p_scaled <= 0
+        else reg_change / p_scaled
+    )
+
+    if override_reason is not None:
+        verdict, reason = "undetermined", override_reason
+    elif prior_reg_raw is None:
+        verdict, reason = "undetermined", "missing_prior_registrations"
+    elif curr_reg_raw is None:
+        verdict, reason = "undetermined", "missing_current_registrations"
+    elif prior_reg_raw <= 0:
+        verdict, reason = "undetermined", "nonpositive_prior_registrations"
+    elif reg_change_frac is None:
+        verdict, reason = "undetermined", "registrations_change_unavailable"
+    elif reg_change >= 0:
+        verdict, reason = "no_registration_dip", "registrations_not_declining_vs_prior_month"
+    elif reg_change_frac < REG_DIP_THRESHOLD:
+        verdict, reason = "registration_dip", None
+    else:
+        verdict, reason = "below_threshold", "registration_dip_within_5_percent"
+
+    return {
+        "triggered": True,
+        "prior_registrations_raw": prior_reg_raw,
+        "current_registrations_raw": curr_reg_raw,
+        "prior_registrations_scaled": None if p_scaled is None else float(p_scaled),
+        "current_registrations_scaled": None if c_scaled is None else float(c_scaled),
+        "registrations_change": None if reg_change is None else float(reg_change),
+        "registrations_change_pct": None if reg_change_frac is None else 100 * float(reg_change_frac),
+        "verdict": verdict,
+        "reason": reason,
+        "blocking_city_keys": list(blocking_keys or []),
+    }
+
+
 def _summarize_block(
     *,
     scope: dict,
@@ -422,6 +495,9 @@ def _summarize_block(
     block_reason: str | None,
     stage_results: dict[str, dict],
     selected_stages: tuple[str, ...],
+    prior_scale: Fraction,
+    curr_scale: Fraction,
+    reg_inputs: tuple[int | None, int | None, str | None, list[str], dict | None],
     coverage: dict | None = None,
     members: list[dict] | None = None,
     omitted_member_count: int = 0,
@@ -472,6 +548,24 @@ def _summarize_block(
         for name, item in stage_results.items()
     }
 
+    reg_triggered = "fe" in primary_stages
+    prior_reg_raw, curr_reg_raw, reg_override, reg_blocking, reg_cov = reg_inputs
+    registration_check = _evaluate_registration_check(
+        triggered=reg_triggered,
+        prior_reg_raw=prior_reg_raw,
+        curr_reg_raw=curr_reg_raw,
+        prior_scale=prior_scale,
+        curr_scale=curr_scale,
+        override_reason=reg_override,
+        blocking_keys=reg_blocking,
+    )
+    public_coverage = None if coverage is None else dict(coverage)
+    if reg_triggered and public_coverage is not None:
+        if reg_cov is not None:
+            public_coverage["registrations"] = reg_cov
+        elif "stage_blocked_city_counts" in public_coverage:
+            public_coverage["registrations_blocked_city_count"] = len(reg_blocking)
+
     return {
         **scope,
         "calendar_adjustment": calendar_meta,
@@ -484,7 +578,8 @@ def _summarize_block(
         "primary_coverage_reached_70_pct": reached_70,
         "flags": flags,
         "stages": public_stages,
-        "coverage": coverage,
+        "registration_check": registration_check,
+        "coverage": public_coverage,
         "members": members,
         "omitted_member_count": omitted_member_count,
         "blocking_city_keys": list(blocking_city_keys or []),
@@ -581,6 +676,13 @@ def _city_block(context: dict, key: str, name: str, selected_stages: tuple[str, 
         p_ftu, ftu_change, block_reason,
     )
     label = (curr_fact or prior_fact or {}).get("city", name)
+    reg_inputs = (
+        None if prior_fact is None else prior_fact["registrations"],
+        None if curr_fact is None else curr_fact["registrations"],
+        None,
+        [],
+        None,
+    )
     return _summarize_block(
         scope=_scope("city", label, context["month"], context["prior_month"], [key]),
         calendar_meta=context["calendar_adjustment"],
@@ -590,6 +692,9 @@ def _city_block(context: dict, key: str, name: str, selected_stages: tuple[str, 
         block_reason=block_reason,
         stage_results=stage_results,
         selected_stages=selected_stages,
+        prior_scale=context["prior_scale"],
+        curr_scale=context["current_scale"],
+        reg_inputs=reg_inputs,
     )
 
 
@@ -602,6 +707,7 @@ def _compact_member(block: dict) -> dict:
         "verdict": block["verdict"],
         "material_stages": block["material_stages"],
         "primary_stages": block["primary_stages"],
+        "registration_check_verdict": block["registration_check"]["verdict"],
         "reason": block["reason"],
     }
 
@@ -657,6 +763,7 @@ def _strict_aggregate_block(
     p_fe, c_fe, fe_block = _strict_sum(keys, prior_facts, curr_facts, ("fe_sessions",))
     p_fe2rr, c_fe2rr, fe2rr_block = _strict_sum(keys, prior_facts, curr_facts, ("fe_sessions", "rr"))
     p_rr2net, c_rr2net, rr2net_block = _strict_sum(keys, prior_facts, curr_facts, ("rr", "net"))
+    p_reg, c_reg, reg_block = _strict_sum(keys, prior_facts, curr_facts, ("registrations",))
 
     counts = {
         "prior_fe": p_fe["fe_sessions"],
@@ -699,6 +806,13 @@ def _strict_aggregate_block(
         "ftu_blocked_city_count": len(ftu_blocking),
         "stage_blocked_city_counts": stage_blocked,
     }
+    reg_inputs = (
+        p_reg["registrations"],
+        c_reg["registrations"],
+        "incomplete_group_member" if reg_block else None,
+        reg_block,
+        None,
+    )
     return _summarize_block(
         scope=_scope(kind, label, context["month"], context["prior_month"], keys),
         calendar_meta=context["calendar_adjustment"],
@@ -708,6 +822,9 @@ def _strict_aggregate_block(
         block_reason=block_reason,
         stage_results=stage_results,
         selected_stages=selected_stages,
+        prior_scale=context["prior_scale"],
+        curr_scale=context["current_scale"],
+        reg_inputs=reg_inputs,
         coverage=coverage,
         members=[_compact_member(item) for item in member_blocks[:MEMBER_PAGE_SIZE]],
         omitted_member_count=max(0, len(member_blocks) - MEMBER_PAGE_SIZE),
@@ -767,6 +884,7 @@ def _national_block(context: dict, selected_stages: tuple[str, ...]) -> dict:
     p_fe, c_fe, fe_cov = _matched_sum(prior_facts, curr_facts, ("fe_sessions",))
     p_fe2rr, c_fe2rr, fe2rr_cov = _matched_sum(prior_facts, curr_facts, ("fe_sessions", "rr"))
     p_rr2net, c_rr2net, rr2net_cov = _matched_sum(prior_facts, curr_facts, ("rr", "net"))
+    p_reg, c_reg, reg_cov = _matched_sum(prior_facts, curr_facts, ("registrations",))
 
     counts = {
         "prior_fe": p_fe["fe_sessions"],
@@ -794,6 +912,13 @@ def _national_block(context: dict, selected_stages: tuple[str, ...]) -> dict:
     for stage in selected_stages:
         coverage[stage] = stage_cov_map[stage]
 
+    reg_inputs = (
+        p_reg["registrations"],
+        c_reg["registrations"],
+        "no_matched_registration_cities" if reg_cov["matched_city_count"] == 0 else None,
+        [],
+        reg_cov,
+    )
     return _summarize_block(
         scope=_scope("national", "National (matched cities)", context["month"], context["prior_month"], []),
         calendar_meta=context["calendar_adjustment"],
@@ -803,6 +928,9 @@ def _national_block(context: dict, selected_stages: tuple[str, ...]) -> dict:
         block_reason=block_reason,
         stage_results=stage_results,
         selected_stages=selected_stages,
+        prior_scale=context["prior_scale"],
+        curr_scale=context["current_scale"],
+        reg_inputs=reg_inputs,
         coverage=coverage,
     )
 
@@ -881,6 +1009,7 @@ def investigate_funnel(
     if any(
         block["verdict"] in ("undetermined", "partial_contributors_identified", "partial_no_material_contributor")
         or any(stage["verdict"] == "undetermined" for stage in block["stages"].values())
+        or block["registration_check"]["verdict"] == "undetermined"
         for block in blocks
     ):
         additions.append(FUNNEL_UNDETERMINED_WARNING)

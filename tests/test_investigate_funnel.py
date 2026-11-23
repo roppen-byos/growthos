@@ -13,12 +13,13 @@ from growthos.evidence import (
     FUNNEL_NATIONAL_MATCHED_WARNING,
     FUNNEL_OVER_EXPLAINED_WARNING,
     FUNNEL_PROXY_WARNING,
+    FUNNEL_UNDETERMINED_WARNING,
 )
 from growthos.funnel_investigation import investigate_funnel
 
 
 def dataset(rows):
-    """Build detached MonthlyData from (month, city, tier, ftu, fe, rr, net) tuples."""
+    """Build detached MonthlyData from (month, city, tier, ftu, fe, rr, net[, registrations]) tuples."""
     raw = demo_payload()
     months = sorted({row[0] for row in rows})
     raw["months"] = months
@@ -32,21 +33,24 @@ def dataset(rows):
         for m in months
     ]
     base_fact = raw["facts"][-1]
-    raw["facts"] = [
-        {
+    facts = []
+    for row in rows:
+        m, city, tier, ftu, fe, rr, net = row[:7]
+        regs = row[7] if len(row) > 7 else base_fact["registrations"]
+        facts.append({
             **base_fact,
             "month": m,
             "city": city,
             "city_key": normalize_city_key(city),
             "source_cities": [city],
             "tier": tier,
+            "registrations": regs,
             "platform_ftu": ftu,
             "fe_sessions": fe,
             "rr": rr,
             "net": net,
-        }
-        for m, city, tier, ftu, fe, rr, net in rows
-    ]
+        })
+    raw["facts"] = facts
     return validate_data(raw)
 
 
@@ -476,17 +480,222 @@ class FunnelInvestigationCalculationTests(unittest.TestCase):
         aug = only(result, "city", "Alpha", month_value="2026-08")
 
         self.assertEqual((jul["verdict"], jul["reason"]), ("undetermined", "no_prior_month"))
+        self.assertEqual(jul["registration_check"]["verdict"], "not_triggered")
         self.assertEqual(list(aug["stages"]), ["fe2rr"])
         self.assertAlmostEqual(aug["stages"]["fe2rr"]["contribution_pct"], 50.0)
         self.assertEqual(aug["stages"]["fe2rr"]["verdict"], "material_contributor")
         self.assertEqual(aug["primary_stages"], ["fe2rr"])
+        self.assertFalse(aug["registration_check"]["triggered"])
+        self.assertEqual(aug["registration_check"]["verdict"], "not_triggered")
+
+    def test_registration_check_triggers_only_when_fe_is_primary_and_uses_exact_5_pct_boundary(self):
+        # All Jul (31d) -> Aug (31d), FTU 1000 -> 800 (-20%).
+        # RegDip: FE primary (-10% -> +50%), Reg drops 10% (2000 -> 1800) -> registration_dip.
+        # RegExact5: FE primary, Reg drops exact 5.0% (2000 -> 1900) -> below_threshold (not flagged).
+        # RegJustOver5: FE primary, 64-bit precision just below -5.0% -> registration_dip.
+        # RegFlat: FE primary, Reg flat (2000 -> 2000) -> no_registration_dip.
+        # RegZeroCurr: FE primary, Reg 2000 -> 0 (-100%) -> registration_dip.
+        # FeMaterialNotPrimary: RR2Net 75% (>70%), FE 30% (>20%, non-primary), Reg crashes -40% -> not_triggered!
+        # NoFtuDip: FTU flat, Reg crashes -40% -> not_triggered!
+        rows = [
+            ("2026-07", "RegDip", "T1", 1000, 10000, 5000, 4000, 2000),
+            ("2026-08", "RegDip", "T1", 800, 9000, 4500, 3600, 1800),
+            ("2026-07", "RegExact5", "T1", 1000, 10000, 5000, 4000, 2000),
+            ("2026-08", "RegExact5", "T1", 800, 9000, 4500, 3600, 1900),
+            ("2026-07", "RegJustOver5", "T1", 1000, 10000, 5000, 4000, 10**15),
+            ("2026-08", "RegJustOver5", "T1", 800, 9000, 4500, 3600, 95 * 10**13 - 1),
+            ("2026-07", "RegFlat", "T1", 1000, 10000, 5000, 4000, 2000),
+            ("2026-08", "RegFlat", "T1", 800, 9000, 4500, 3600, 2000),
+            ("2026-07", "RegZeroCurr", "T1", 1000, 10000, 5000, 4000, 2000),
+            ("2026-08", "RegZeroCurr", "T1", 800, 9000, 4500, 3600, 0),
+            ("2026-07", "FeMaterialNotPrimary", "T1", 1000, 10000, 5000, 4000, 2000),
+            ("2026-08", "FeMaterialNotPrimary", "T1", 800, 9400, 4700, 3196, 1200),
+            ("2026-07", "NoFtuDip", "T1", 1000, 10000, 5000, 4000, 2000),
+            ("2026-08", "NoFtuDip", "T1", 1000, 8000, 4000, 3200, 1200),
+        ]
+        result = investigate_funnel(
+            dataset(rows),
+            requested_months=["2026-08"],
+            cities=[
+                "RegDip", "RegExact5", "RegJustOver5", "RegFlat",
+                "RegZeroCurr", "FeMaterialNotPrimary", "NoFtuDip",
+            ],
+        )
+        self.assertEqual(result["thresholds"]["registration_dip_below_pct"], -5)
+
+        dip = only(result, "city", "RegDip")["registration_check"]
+        self.assertTrue(dip["triggered"])
+        self.assertEqual(dip["verdict"], "registration_dip")
+        self.assertIsNone(dip["reason"])
+        self.assertEqual(dip["prior_registrations_raw"], 2000)
+        self.assertEqual(dip["current_registrations_raw"], 1800)
+        self.assertAlmostEqual(dip["registrations_change"], -200.0)
+        self.assertAlmostEqual(dip["registrations_change_pct"], -10.0)
+
+        exact5 = only(result, "city", "RegExact5")["registration_check"]
+        self.assertTrue(exact5["triggered"])
+        self.assertEqual((exact5["verdict"], exact5["reason"]), ("below_threshold", "registration_dip_within_5_percent"))
+        self.assertAlmostEqual(exact5["registrations_change_pct"], -5.0)
+
+        just_over = only(result, "city", "RegJustOver5")["registration_check"]
+        self.assertTrue(just_over["triggered"])
+        self.assertEqual(just_over["verdict"], "registration_dip")
+
+        flat = only(result, "city", "RegFlat")["registration_check"]
+        self.assertTrue(flat["triggered"])
+        self.assertEqual((flat["verdict"], flat["reason"]), ("no_registration_dip", "registrations_not_declining_vs_prior_month"))
+        self.assertEqual(flat["registrations_change_pct"], 0.0)
+
+        zero_curr = only(result, "city", "RegZeroCurr")["registration_check"]
+        self.assertTrue(zero_curr["triggered"])
+        self.assertEqual(zero_curr["verdict"], "registration_dip")
+        self.assertAlmostEqual(zero_curr["registrations_change_pct"], -100.0)
+
+        non_primary_block = only(result, "city", "FeMaterialNotPrimary")
+        self.assertEqual(non_primary_block["material_stages"], ["rr2net", "fe"])
+        self.assertEqual(non_primary_block["primary_stages"], ["rr2net"])
+        non_primary = non_primary_block["registration_check"]
+        self.assertFalse(non_primary["triggered"])
+        self.assertEqual((non_primary["verdict"], non_primary["reason"]), ("not_triggered", "fe_not_primary"))
+        self.assertIsNone(non_primary["prior_registrations_raw"])
+        self.assertIsNone(non_primary["registrations_change_pct"])
+
+        no_dip = only(result, "city", "NoFtuDip")["registration_check"]
+        self.assertFalse(no_dip["triggered"])
+        self.assertEqual((no_dip["verdict"], no_dip["reason"]), ("not_triggered", "fe_not_primary"))
+
+    def test_registration_check_applies_shorter_month_calendar_scaling(self):
+        # Sep (30d) -> Oct (31d): Oct scaled by 30/31.
+        # Reg 30,000 -> 29,140 (-2.87% raw, but 29,140 * 30/31 = 28,200 -> -6.0% scaled > 5% -> registration_dip!).
+        rows = [
+            ("2026-09", "Alpha", "T1", 30000, 300000, 150000, 120000, 30000),
+            ("2026-10", "Alpha", "T1", 29140, 291400, 145700, 116560, 29140),
+        ]
+        result = investigate_funnel(dataset(rows), requested_months=["2026-10"], cities=["Alpha"])
+        reg = only(result, "city", "Alpha")["registration_check"]
+        self.assertTrue(reg["triggered"])
+        self.assertEqual(reg["verdict"], "registration_dip")
+        self.assertEqual(reg["prior_registrations_scaled"], 30000.0)
+        self.assertAlmostEqual(reg["current_registrations_scaled"], 28200.0)
+        self.assertAlmostEqual(reg["registrations_change"], -1800.0)
+        self.assertAlmostEqual(reg["registrations_change_pct"], -6.0)
+
+    def test_registration_check_missing_or_zero_operands_isolate_from_funnel_stages(self):
+        # Missing/nonpositive registrations never block fe/fe2rr/rr2net or downgrade block verdict.
+        # NonFeNullReg has null registrations, but FE is NOT primary -> not_triggered and no undetermined warning.
+        rows = [
+            ("2026-07", "MissingPrior", "T1", 1000, 10000, 5000, 4000, None),
+            ("2026-08", "MissingPrior", "T1", 800, 9000, 4500, 3600, 1800),
+            ("2026-07", "MissingCurr", "T1", 1000, 10000, 5000, 4000, 2000),
+            ("2026-08", "MissingCurr", "T1", 800, 9000, 4500, 3600, None),
+            ("2026-07", "ZeroPrior", "T1", 1000, 10000, 5000, 4000, 0),
+            ("2026-08", "ZeroPrior", "T1", 800, 9000, 4500, 3600, 1800),
+            ("2026-07", "NonFeNullReg", "T1", 1000, 10000, 5000, 4000, None),
+            ("2026-08", "NonFeNullReg", "T1", 800, 10000, 5000, 3000, None),
+        ]
+        result = investigate_funnel(
+            dataset(rows),
+            requested_months=["2026-08"],
+            cities=["MissingPrior", "MissingCurr", "ZeroPrior"],
+        )
+        self.assertIn(FUNNEL_UNDETERMINED_WARNING, result["warnings"])
+        for city, expected_reason in (
+            ("MissingPrior", "missing_prior_registrations"),
+            ("MissingCurr", "missing_current_registrations"),
+            ("ZeroPrior", "nonpositive_prior_registrations"),
+        ):
+            block = only(result, "city", city)
+            self.assertEqual(block["verdict"], "contributors_identified")
+            self.assertEqual(block["primary_stages"], ["fe"])
+            self.assertEqual(block["stages"]["fe"]["verdict"], "material_contributor")
+            self.assertTrue(block["registration_check"]["triggered"])
+            self.assertEqual(
+                (block["registration_check"]["verdict"], block["registration_check"]["reason"]),
+                ("undetermined", expected_reason),
+            )
+
+        clean_non_fe = investigate_funnel(
+            dataset(rows), requested_months=["2026-08"], cities=["NonFeNullReg"],
+        )
+        non_fe_block = only(clean_non_fe, "city", "NonFeNullReg")
+        self.assertEqual(non_fe_block["primary_stages"], ["rr2net"])
+        self.assertEqual(non_fe_block["registration_check"]["verdict"], "not_triggered")
+        self.assertNotIn(FUNNEL_UNDETERMINED_WARNING, clean_non_fe["warnings"])
+
+    def test_registration_check_tier_group_and_national_scopes(self):
+        # T2 has Alpha (reg 1000->800, -20%) and Bravo (reg 1000->None) -> blocks aggregate reg check only.
+        # PairOk has Alpha + Charlie (reg 1000->800 + 1000->960 = 2000->1760 = -12% -> registration_dip).
+        # National excludes Delta (Aug-only) from matched registration rollup and exposes coverage["registrations"].
+        rows = [
+            ("2026-07", "Alpha", "T2", 600, 6000, 3000, 2400, 1000),
+            ("2026-07", "Bravo", "T2", 400, 4000, 2000, 1600, 1000),
+            ("2026-08", "Alpha", "T2", 480, 4800, 2400, 1920, 800),
+            ("2026-08", "Bravo", "T2", 320, 3200, 1600, 1280, None),
+            ("2026-07", "Charlie", "T1", 400, 4000, 2000, 1600, 1000),
+            ("2026-08", "Charlie", "T1", 320, 3200, 1600, 1280, 960),
+            ("2026-08", "Delta", "T3", 500, 50000, 25000, 20000, 9000),
+        ]
+        result = investigate_funnel(
+            dataset(rows),
+            requested_months=["2026-08"],
+            tier="T2",
+            groups=[("PairOk", ["Alpha", "Charlie"])],
+            national=True,
+        )
+        t2 = only(result, "tier", "T2")
+        self.assertEqual(t2["verdict"], "contributors_identified")
+        self.assertEqual(t2["primary_stages"], ["fe"])
+        self.assertTrue(t2["registration_check"]["triggered"])
+        self.assertEqual((t2["registration_check"]["verdict"], t2["registration_check"]["reason"]),
+                         ("undetermined", "incomplete_group_member"))
+        self.assertEqual(t2["registration_check"]["blocking_city_keys"], ["bravo"])
+        self.assertEqual(t2["coverage"]["registrations_blocked_city_count"], 1)
+        member_verdicts = {m["city"]: m["registration_check_verdict"] for m in t2["members"]}
+        self.assertEqual(member_verdicts, {"Alpha": "registration_dip", "Bravo": "undetermined"})
+
+        pair = only(result, "group", "PairOk")
+        self.assertTrue(pair["registration_check"]["triggered"])
+        self.assertEqual(pair["registration_check"]["verdict"], "registration_dip")
+        self.assertAlmostEqual(pair["registration_check"]["registrations_change_pct"], -12.0)
+        self.assertEqual(pair["coverage"]["registrations_blocked_city_count"], 0)
+
+        nat = only(result, "national")
+        self.assertTrue(nat["registration_check"]["triggered"])
+        self.assertEqual(nat["registration_check"]["verdict"], "registration_dip")
+        self.assertAlmostEqual(nat["registration_check"]["registrations_change_pct"], -12.0)
+        self.assertEqual(nat["coverage"]["registrations"]["matched_city_count"], 2)
+        self.assertEqual(nat["coverage"]["registrations"]["excluded_city_count"], 2)
+
+        # National with FE primary but zero matched registration cities -> no_matched_registration_cities.
+        no_reg_rows = [
+            ("2026-07", "Alpha", "T1", 1000, 10000, 5000, 4000, None),
+            ("2026-08", "Alpha", "T1", 800, 9000, 4500, 3600, 1800),
+        ]
+        no_reg_nat = only(
+            investigate_funnel(dataset(no_reg_rows), requested_months=["2026-08"], national=True),
+            "national",
+        )
+        self.assertTrue(no_reg_nat["registration_check"]["triggered"])
+        self.assertEqual(
+            (no_reg_nat["registration_check"]["verdict"], no_reg_nat["registration_check"]["reason"]),
+            ("undetermined", "no_matched_registration_cities"),
+        )
+        self.assertEqual(no_reg_nat["coverage"]["registrations"]["matched_city_count"], 0)
+
+        # National with FE NOT primary -> registrations omitted from coverage.
+        non_fe_nat = only(
+            investigate_funnel(dataset(no_reg_rows), requested_months=["2026-08"], national=True, stages=["fe2rr"]),
+            "national",
+        )
+        self.assertFalse(non_fe_nat["registration_check"]["triggered"])
+        self.assertNotIn("registrations", non_fe_nat["coverage"])
 
 
 class FunnelInvestigationCliTests(unittest.TestCase):
     def invoke(self, arguments, data=None):
         rows = [
-            ("2026-07", "Alpha", "T1", 1000, 10000, 5000, 4000),
-            ("2026-08", "Alpha", "T1", 800, 9000, 4500, 3600),
+            ("2026-07", "Alpha", "T1", 1000, 10000, 5000, 4000, 2000),
+            ("2026-08", "Alpha", "T1", 800, 9000, 4500, 3600, 1800),
         ]
         store = FixtureReaderStore(data or dataset(rows))
 
@@ -509,6 +718,8 @@ class FunnelInvestigationCliTests(unittest.TestCase):
         self.assertEqual(result["stages"], ["fe", "fe2rr", "rr2net"])
         self.assertEqual(len(result["blocks"]), 1)
         self.assertEqual(result["blocks"][0]["kind"], "national")
+        self.assertEqual(result["blocks"][0]["registration_check"]["verdict"], "registration_dip")
+        self.assertAlmostEqual(result["blocks"][0]["registration_check"]["registrations_change_pct"], -10.0)
 
         code2, result2 = self.invoke([
             "investigate-funnel", "--month", "2026-08", "--city", "Alpha", "--stage", "fe2rr",
@@ -516,6 +727,7 @@ class FunnelInvestigationCliTests(unittest.TestCase):
         self.assertEqual(code2, 0)
         self.assertEqual(result2["stages"], ["fe2rr"])
         self.assertEqual(list(result2["blocks"][0]["stages"]), ["fe2rr"])
+        self.assertEqual(result2["blocks"][0]["registration_check"]["verdict"], "not_triggered")
 
     def test_invalid_selectors_fail_before_reader_and_never_echo_inputs(self):
         with patch("growthos.cli.connect_reader") as reader:

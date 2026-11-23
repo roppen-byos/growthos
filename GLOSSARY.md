@@ -330,7 +330,16 @@ Registrations explain more than the configured stop share of the FTU target gap;
 Registrations met or beat target, so the FTU gap is not explained by registration volume; the investigation continues.
 
 **`below_threshold`**:
-A contribution above zero but at or below the configured stop threshold; the investigation continues.
+A contribution or month-on-month registration dip in the worsening direction that stays within the configured threshold; the flag or stop rule does not fire.
+
+**`registration_dip`**:
+`FE` is a primary issue and calendar-adjusted month-on-month Registrations also fell past the configured dip margin; annotated inline as `FE (reg. issue)` while stopping upstream at Registrations.
+
+**`no_registration_dip`**:
+`FE` is a primary issue, but calendar-adjusted month-on-month Registrations stayed flat or grew, so the `FE` drop is not accompanied by a registration volume drop.
+
+**`not_triggered`**:
+A conditional follow-up check did not run because its trigger condition was not met (for example, the month-on-month Registration check when `FE` is not a primary issue).
 
 **`not_applicable`**:
 The check does not apply — for Step 1 when FTU met its target, for Step 2 when there was no material dip.

@@ -16,7 +16,7 @@ Use this reference whenever interpreting `.venv/bin/python -m growthos investiga
 ## Method and exact boundaries
 
 - **Baseline:** immediately previous calendar month (`prior_month`). Never substitute an older month when `prior_month` is absent.
-- **Calendar scaling:** let `d_ref = min(prior_days, current_days)`. Volume counts (Platform FTU, FE sessions, RR, Net) in the longer month are multiplied by `d_ref / month_days` using exact rational arithmetic (e.g. October 31 days vs September 30 days scales October by `30/31`). Rates `FE2RR = RR / FE sessions` and `RR2Net = Net / RR` are invariant under scaling. Always describe this as proportional daily-average scaling, never as literally removing the extra calendar day.
+- **Calendar scaling:** let `d_ref = min(prior_days, current_days)`. Volume counts (Platform FTU, Registrations, FE sessions, RR, Net) in the longer month are multiplied by `d_ref / month_days` using exact rational arithmetic (e.g. October 31 days vs September 30 days scales October by `30/31`). Rates `FE2RR = RR / FE sessions` and `RR2Net = Net / RR` are invariant under scaling. Always describe this as proportional daily-average scaling, never as literally removing the extra calendar day.
 - **Strict `> 5%` calendar-adjusted MoM FTU dip gate:**
   - `ftu_change = current_ftu_scaled - prior_ftu_scaled` (negative indicates an MoM dip).
   - Stage decomposition runs only when the calendar-adjusted MoM FTU drop is strictly greater than `5%` (`ftu_change / prior_ftu_scaled < -5%`, exact rational test).
@@ -31,6 +31,13 @@ Use this reference whenever interpreting `.venv/bin/python -m growthos investiga
     - If two stages cross `> 70%` (e.g. `RR2Net 60.98% + FE 36.59% = 97.56%`), those two are `primary_stages` while the third `> 20%` stage (`FE2RR 27.44%`) remains visible with `material: true, selected_as_primary: false`.
     - If all `> 20%` stages combined still sum `<= 70%`, all `> 20%` stages are retained in `primary_stages` with `primary_coverage_reached_70_pct: false`.
   - Exact rational arithmetic governs every threshold and rank; display rounding never changes a verdict or primary selection.
+- **MoM Registration check when `FE` is primary (`registration_check`):**
+  - Triggers **only when `fe` is in `primary_stages`** (completely independent of Step 1's same-month Registration target check; upstream still stops at Registrations). When `fe` is not in `primary_stages` (including `fe` material-but-non-primary, `no_material_ftu_dip`, `no_historical_ftu_dip`, or `--stage` excluding `fe`), `registration_check` returns `triggered: false`, `verdict: "not_triggered"`, `reason: "fe_not_primary"`, and `null` metric fields.
+  - Uses the same shorter-month proportional calendar scaling on `registrations` (`reg_change = current_reg_scaled - prior_reg_scaled`, exact rational arithmetic):
+    - `reg_change / prior_reg_scaled < -5%` (strict `> 5%` MoM dip) -> **`registration_dip`** (render `FE` as **`FE (reg. issue)`**).
+    - `-5% <= reg_change_pct < 0%` (including exact `-5.00%`) -> **`below_threshold`** (`registration_dip_within_5_percent`; render plain **`FE`**).
+    - `reg_change >= 0` -> **`no_registration_dip`** (`registrations_not_declining_vs_prior_month`; render plain **`FE`**).
+    - Missing/nonpositive `registrations` or incomplete aggregate/matched cohort -> **`undetermined`** (render **`FE (reg. N/A)`**; strictly isolated so it never blocks `fe`, `fe2rr`, or `rr2net`).
 
 ## Stage and block verdicts
 
@@ -41,6 +48,14 @@ Render the historical funnel panel with these exact six columns:
 `City | Cal.-Adj. MoM FTU Dip | Primary Issues (>20%, cum. >70%) | FE Share of Dip | FE2RR Share of Dip | RR2Net Share of Dip`
 
 Add one concise note beside the table: `+` means the stage worsened and contributed to the FTU dip (**bold** = selected primary issue from `> 20%` stages until cumulative `> 70%`); `−` means the stage stayed flat or improved (helped offset the dip). Counterfactual percentages omit interaction terms and need not sum to 100%.
+
+When `FE` is in `primary_stages`, format `FE` inline in `Primary Issues` using `registration_check`, and add a one-line footnote directly below the table listing each triggered city's exact calendar-adjusted MoM `Registrations %` (or unavailable reason) from the CLI:
+
+| `registration_check.verdict` | Inline `FE` label in `Primary Issues` | Meaning |
+| --- | --- | --- |
+| `registration_dip` | **`FE (reg. issue)`** (e.g. **`RR2Net, FE (reg. issue)`**) | Cal.-adj. MoM Registrations fell strictly `> 5%` (`< -5%`) |
+| `below_threshold` / `no_registration_dip` | **`FE`** | Cal.-adj. MoM Registrations dipped `<= 5%`, stayed flat, or grew |
+| `undetermined` | **`FE (reg. N/A)`** | Registrations operand missing/nonpositive or aggregate member incomplete (`reason` disclosed in footnote) |
 
 Stage verdicts and compact cell formatting:
 
@@ -77,12 +92,13 @@ Block verdicts and `Primary Issues (>20%, cum. >70%)` summary values:
 ## Aggregate scopes
 
 - **Named cities:** each `--city` returns one independent block; never sum separate cities unless an explicit `--group` or `--tier` was requested.
-- **`--tier` and `--group`:** roll up counts before computing ratios. `--tier` uses the selected month's stored tier cohort. Member completeness is strict per stage: if one city lacks `Net`, only `rr2net` returns `undetermined` (`incomplete_group_member`) with `blocking_city_keys`, while `fe` and `fe2rr` still evaluate.
-- **`--national`:** default when no selector is supplied; rolls up matched cities observed in both months per metric/stage (`platform_ftu`, `fe`, `fe2rr`, `rr2net`). Always report `matched_city_count` and `excluded_city_count` from `coverage`.
+- **`--tier` and `--group`:** roll up counts before computing ratios. `--tier` uses the selected month's stored tier cohort. Member completeness is strict per stage and for `registration_check`: if one city lacks `Net`, only `rr2net` returns `undetermined` (`incomplete_group_member`) with `blocking_city_keys`; if one city lacks `registrations` when `fe` is primary, only `registration_check` returns `undetermined` (`incomplete_group_member`) with `blocking_city_keys`, while `fe`, `fe2rr`, and `rr2net` still evaluate.
+- **`--national`:** default when no selector is supplied; rolls up matched cities observed in both months per metric/stage (`platform_ftu`, `fe`, `fe2rr`, `rr2net`, plus `registrations` when `registration_check` is triggered). Always report `matched_city_count` and `excluded_city_count` from `coverage`.
 
 ## Wording guardrails
 
 - State that `FE`, `FE2RR`, and `RR2Net` come from the **FTU-eligible funnel** (days on/before first completed platform ride + Zero-Transaction customers, counting sessions/rides including same-day rides rather than distinct FTU users) and are applied as hold-two-constant counterfactuals on scaled Platform FTU — not causal proof.
+- Keep Step 3's MoM Registration check (`FE (reg. issue)` — calendar-adjusted MoM `Registrations` dip `> 5%` when `FE` is primary) clearly distinct from Step 1's same-month Registration target shortfall (`investigate` `> 70%`), and stop upstream at Registrations (no Installs or Paid/Organic attribution).
 - When `primary_coverage_reached_70_pct` is `false` (all `> 20%` stages summed `<= 70%`), still report `primary_stages` and explicitly note the cumulative share was `<= 70%`.
 - When a block returns `no_material_funnel_contributor`, show all three measured stage percentages and note that combined small dips or differences between session/ride counts (including same-day repeat rides) and distinct Platform FTU may be at play, without asserting an unmeasured cause.
 - Keep **Target lens** (`variance = actual - target`, Registration contribution `> 70%`) clearly distinct from **Historical funnel lens** (calendar-adjusted MoM FTU dip `> 5%`, `> 20%` stage floor, `> 70%` cumulative primary cutoff).
