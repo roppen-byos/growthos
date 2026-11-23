@@ -69,6 +69,7 @@ Rapido's new-user acquisition funnel tracking monthly app installations, first-t
 
 **Installs**:
 New Rapido app installations in a reporting month; counts installations rather than unique lifetime people because existing customers can uninstall and reinstall.
+_Scope_: Not a city-level absolute metric — never rank, shortlist, or compare cities on install counts. City installs are read directionally only, to describe organic versus paid movement.
 _Avoid_: Unique installers, new users
 _Registry_: `installs`
 
@@ -103,6 +104,7 @@ _Avoid_: SVN
 
 **I2R (Install-to-Registration Ratio)**:
 Registrations divided by Installs for the same reporting period; compares period totals rather than a matched install cohort.
+_Scope_: National and aggregate scopes only; do not compute or report I2R per city, because Installs are not a reliable city-level absolute.
 _Registry_: `i2r`
 
 **R2N (Registration-to-PFTU Ratio)**:

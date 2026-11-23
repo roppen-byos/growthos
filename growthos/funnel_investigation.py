@@ -6,8 +6,8 @@ Platform FTU dip via hold-two-constant counterfactual proxies using exact ration
 arithmetic, selects > 20% stages descending until cumulative contribution
 exceeds > 70%, checks calendar-adjusted MoM Registrations (> 5% dip) when FE is
 primary, and breaks down Bike/Auto/Cab drivers (> 30%, no cumulative cap) when
-FE2RR (additive) or RR2Net (current-RR-weighted) is primary; floats are
-presentation only.
+FE2RR (additive) or RR2Net (weighted rate + mix vs prior platform RR2Net) is
+primary; floats are presentation only.
 """
 
 from __future__ import annotations
@@ -86,16 +86,21 @@ METHOD = {
             "Residual non-Bike/Auto/Cab RR (e.g. c2c/delivery) is disclosed in other_services_contribution_pct."
         ),
         "rr2net_formula": (
-            "Current-RR-weighted rate effect against actual Platform RR2Net change: "
-            "w_s = current_service_rr / current_rr; r_s = service_net / service_rr; "
-            "contribution = (w_s * (current_r_s - prior_r_s)) / (current_rr2net - prior_rr2net). "
-            "Service mix shift and non-Bike/Auto/Cab residuals are disclosed in "
-            "mix_shift_contribution_pct and other_services_contribution_pct."
+            "Weighted MoM rate + mix effect benchmarked against prior Platform RR2Net: "
+            "w_s = service_rr / rr; r_s = service_net / service_rr; R_prior = prior_net / prior_rr; "
+            "weighted_rate_delta_s = w_curr * (r_curr - r_prior); "
+            "mix_shift_delta_s = (w_curr - w_prior) * (r_prior - R_prior); "
+            "weighted_total_delta_s = w_curr * (r_curr - R_prior) - w_prior * (r_prior - R_prior) "
+            "= weighted_rate_delta_s + mix_shift_delta_s; "
+            "contribution_s = weighted_total_delta_s / (current_rr2net - prior_rr2net). "
+            "Per-service rate and mix components are exposed alongside aggregate mix_shift_contribution_pct "
+            "and non-Bike/Auto/Cab other_services_contribution_pct (which sum with Bike/Auto/Cab to 100%)."
         ),
         "inactive_service_handling": (
-            "Zero service RR in both months returns not_applicable (no_service_volume); one-sided zero "
-            "RR in RR2Net returns not_applicable (service_absent_in_prior_month / service_absent_in_current_month) "
-            "and is reflected in mix_shift_contribution_pct. Missing counts are strictly isolated per service."
+            "Zero service RR in both months returns not_applicable (no_service_volume). One-sided zero RR "
+            "(launch or shutdown) is scored directly in both FE2RR and RR2Net: in RR2Net, launches score "
+            "w_curr * (r_curr - R_prior) and shutdowns score -w_prior * (r_prior - R_prior) as pure mix-shift "
+            "effects (with rate_delta_pp and weighted_rate_delta_pp null). Missing counts are strictly isolated per service."
         ),
     },
     "threshold_comparison": "strictly_greater_than",
@@ -693,7 +698,7 @@ def _evaluate_rr2net_services(
     if not triggered:
         return {
             "triggered": False,
-            "method": "current_rr_weighted_rr2net_delta",
+            "method": "weighted_rr2net_rate_and_mix_delta",
             "verdict": "not_triggered",
             "reason": "rr2net_not_primary",
             "material_services": [],
@@ -713,17 +718,23 @@ def _evaluate_rr2net_services(
     for svc in SERVICES:
         inp = service_inputs[svc]
         p_plat_rr, c_plat_rr = inp["prior_platform_rr"], inp["curr_platform_rr"]
+        p_plat_net = inp["prior_platform_net"]
         s_prior_rr, s_curr_rr = inp["prior_rr"], inp["curr_rr"]
         s_prior_net, s_curr_net = inp["prior_net"], inp["curr_net"]
         override_reason = inp["override_reason"]
         blocking_keys = list(inp["blocking_keys"])
 
+        s_p_platform = _rate(p_plat_net, p_plat_rr)
         p_share = _rate(s_prior_rr, p_plat_rr)
         c_share = _rate(s_curr_rr, c_plat_rr)
         p_rate = _rate(s_prior_net, s_prior_rr)
         c_rate = _rate(s_curr_net, s_curr_rr)
         rate_delta = None if p_rate is None or c_rate is None else c_rate - p_rate
-        weighted_delta: Fraction | None = None
+        weighted_rate_delta: Fraction | None = None
+        mix_shift_delta: Fraction | None = None
+        weighted_total_delta: Fraction | None = None
+        rate_contribution: Fraction | None = None
+        mix_contribution: Fraction | None = None
         contribution: Fraction | None = None
         flags: list[str] = []
 
@@ -733,6 +744,8 @@ def _evaluate_rr2net_services(
             verdict, reason, material = "undetermined", "missing_prior_rr", None
         elif c_plat_rr is None:
             verdict, reason, material = "undetermined", "missing_current_rr", None
+        elif p_plat_net is None:
+            verdict, reason, material = "undetermined", "missing_prior_net", None
         elif s_prior_rr is None:
             verdict, reason, material = "undetermined", f"missing_prior_{svc}_rr", None
         elif s_curr_rr is None:
@@ -745,6 +758,8 @@ def _evaluate_rr2net_services(
             verdict, reason, material = "undetermined", "nonpositive_prior_rr", None
         elif c_plat_rr <= 0:
             verdict, reason, material = "undetermined", "nonpositive_current_rr", None
+        elif p_plat_net < 0:
+            verdict, reason, material = "undetermined", "negative_prior_net", None
         elif s_prior_rr < 0:
             verdict, reason, material = "undetermined", f"negative_prior_{svc}_rr", None
         elif s_curr_rr < 0:
@@ -754,18 +769,41 @@ def _evaluate_rr2net_services(
         elif s_curr_net < 0:
             verdict, reason, material = "undetermined", f"negative_current_{svc}_net", None
         elif s_prior_rr == 0 and s_curr_rr == 0:
-            verdict, reason, material = "not_applicable", "no_service_volume", False
-        elif s_prior_rr == 0:
-            verdict, reason, material = "not_applicable", "service_absent_in_prior_month", False
-        elif s_curr_rr == 0:
-            verdict, reason, material = "not_applicable", "service_absent_in_current_month", False
+            if s_prior_net == 0 and s_curr_net == 0:
+                verdict, reason, material = "not_applicable", "no_service_volume", False
+            else:
+                verdict, reason, material = "undetermined", "contribution_unavailable", None
         elif platform_delta is None or platform_delta >= 0:
             verdict, reason, material = "not_applicable", "no_rr2net_dip", False
-        elif rate_delta is None or c_share is None:
+        elif s_p_platform is None or p_share is None or c_share is None:
+            verdict, reason, material = "undetermined", "contribution_unavailable", None
+        elif s_prior_rr == 0:
+            if s_prior_net != 0 or c_rate is None:
+                verdict, reason, material = "undetermined", "contribution_unavailable", None
+            else:
+                mix_shift_delta = c_share * (c_rate - s_p_platform)
+                weighted_total_delta = mix_shift_delta
+                contribution = weighted_total_delta / platform_delta
+                mix_contribution = contribution
+                verdict, reason, material, flags = _classify_service_contribution(contribution)
+        elif s_curr_rr == 0:
+            if s_curr_net != 0 or p_rate is None:
+                verdict, reason, material = "undetermined", "contribution_unavailable", None
+            else:
+                mix_shift_delta = -p_share * (p_rate - s_p_platform)
+                weighted_total_delta = mix_shift_delta
+                contribution = weighted_total_delta / platform_delta
+                mix_contribution = contribution
+                verdict, reason, material, flags = _classify_service_contribution(contribution)
+        elif rate_delta is None or p_rate is None:
             verdict, reason, material = "undetermined", "contribution_unavailable", None
         else:
-            weighted_delta = c_share * rate_delta
-            contribution = weighted_delta / platform_delta
+            weighted_rate_delta = c_share * rate_delta
+            mix_shift_delta = (c_share - p_share) * (p_rate - s_p_platform)
+            weighted_total_delta = weighted_rate_delta + mix_shift_delta
+            rate_contribution = weighted_rate_delta / platform_delta
+            mix_contribution = mix_shift_delta / platform_delta
+            contribution = weighted_total_delta / platform_delta
             verdict, reason, material, flags = _classify_service_contribution(contribution)
 
         results[svc] = {
@@ -779,7 +817,11 @@ def _evaluate_rr2net_services(
             "prior_value": None if p_rate is None else float(p_rate),
             "current_value": None if c_rate is None else float(c_rate),
             "rate_delta_pp": None if rate_delta is None else 100 * float(rate_delta),
-            "weighted_rate_delta_pp": None if weighted_delta is None else 100 * float(weighted_delta),
+            "weighted_rate_delta_pp": None if weighted_rate_delta is None else 100 * float(weighted_rate_delta),
+            "mix_shift_delta_pp": None if mix_shift_delta is None else 100 * float(mix_shift_delta),
+            "weighted_total_delta_pp": None if weighted_total_delta is None else 100 * float(weighted_total_delta),
+            "rate_contribution_pct": None if rate_contribution is None else 100 * float(rate_contribution),
+            "mix_shift_contribution_pct": None if mix_contribution is None else 100 * float(mix_contribution),
             "contribution_pct": None if contribution is None else 100 * float(contribution),
             "material": material,
             "verdict": verdict,
@@ -787,7 +829,7 @@ def _evaluate_rr2net_services(
             "flags": flags,
             "blocking_city_keys": blocking_keys,
             "_contribution": contribution,
-            "_weighted_delta": weighted_delta,
+            "_weighted_rate_delta": weighted_rate_delta,
         }
 
     mix_pct: float | None = None
@@ -796,6 +838,7 @@ def _evaluate_rr2net_services(
         same_cohort
         and platform_delta is not None
         and platform_delta < 0
+        and p_platform is not None
         and prior_rr is not None
         and curr_rr is not None
         and prior_rr > 0
@@ -815,25 +858,29 @@ def _evaluate_rr2net_services(
             and curr_other_net >= 0
         ):
             sum_commute_rate = sum(
-                (results[svc]["_weighted_delta"] for svc in SERVICES if results[svc]["_weighted_delta"] is not None),
+                (results[svc]["_weighted_rate_delta"] for svc in SERVICES if results[svc]["_weighted_rate_delta"] is not None),
                 Fraction(0),
             )
-            if prior_other_rr == 0 and curr_other_rr == 0 and prior_other_net == 0 and curr_other_net == 0:
-                other_term = Fraction(0)
-            elif prior_other_rr > 0 and curr_other_rr > 0:
-                other_term = Fraction(curr_other_rr, curr_rr) * (
+            prior_other_share = Fraction(prior_other_rr, prior_rr)
+            curr_other_share = Fraction(curr_other_rr, curr_rr)
+            other_total_term = (
+                (Fraction(curr_other_net, curr_rr) - curr_other_share * p_platform)
+                - (Fraction(prior_other_net, prior_rr) - prior_other_share * p_platform)
+            )
+            if prior_other_rr > 0 and curr_other_rr > 0:
+                other_rate_term = curr_other_share * (
                     Fraction(curr_other_net, curr_other_rr) - Fraction(prior_other_net, prior_other_rr)
                 )
             else:
-                other_term = Fraction(curr_other_net, curr_rr) - Fraction(prior_other_net, prior_rr)
-            mix_term = platform_delta - sum_commute_rate - other_term
-            other_pct = 100 * float(other_term / platform_delta)
+                other_rate_term = Fraction(0)
+            mix_term = platform_delta - sum_commute_rate - other_rate_term
+            other_pct = 100 * float(other_total_term / platform_delta)
             mix_pct = 100 * float(mix_term / platform_delta)
 
     verdict, reason, material_services, flags, blocking = _service_breakdown_verdict(results)
     return {
         "triggered": True,
-        "method": "current_rr_weighted_rr2net_delta",
+        "method": "weighted_rr2net_rate_and_mix_delta",
         "verdict": verdict,
         "reason": reason,
         "material_services": material_services,
@@ -1120,6 +1167,7 @@ def _city_block(context: dict, key: str, name: str, selected_stages: tuple[str, 
                 svc: {
                     "prior_platform_rr": counts["prior_rr2net_rr"],
                     "curr_platform_rr": counts["curr_rr2net_rr"],
+                    "prior_platform_net": counts["prior_rr2net_net"],
                     "prior_rr": None if prior_fact is None else prior_fact[SERVICE_FIELDS[svc][0]],
                     "curr_rr": None if curr_fact is None else curr_fact[SERVICE_FIELDS[svc][0]],
                     "prior_net": None if prior_fact is None else prior_fact[SERVICE_FIELDS[svc][1]],
@@ -1277,10 +1325,11 @@ def _strict_aggregate_block(
             "override_reason": "incomplete_group_member" if s_fe2rr_block else None,
             "blocking_keys": s_fe2rr_block,
         }
-        p_s_rr2net, c_s_rr2net, s_rr2net_block = _strict_sum(keys, prior_facts, curr_facts, ("rr", rr_col, net_col))
+        p_s_rr2net, c_s_rr2net, s_rr2net_block = _strict_sum(keys, prior_facts, curr_facts, ("rr", "net", rr_col, net_col))
         rr2net_svc_map[svc] = {
             "prior_platform_rr": p_s_rr2net["rr"],
             "curr_platform_rr": c_s_rr2net["rr"],
+            "prior_platform_net": p_s_rr2net["net"],
             "prior_rr": p_s_rr2net[rr_col],
             "curr_rr": c_s_rr2net[rr_col],
             "prior_net": p_s_rr2net[net_col],
@@ -1431,11 +1480,12 @@ def _national_block(context: dict, selected_stages: tuple[str, ...]) -> dict:
             "override_reason": "no_matched_service_cities" if s_fe2rr_cov["matched_city_count"] == 0 else None,
             "blocking_keys": [],
         }
-        p_s_rr2net, c_s_rr2net, s_rr2net_cov = _matched_sum(prior_facts, curr_facts, ("rr", rr_col, net_col))
+        p_s_rr2net, c_s_rr2net, s_rr2net_cov = _matched_sum(prior_facts, curr_facts, ("rr", "net", rr_col, net_col))
         rr2net_svc_cov[svc] = s_rr2net_cov
         rr2net_svc_map[svc] = {
             "prior_platform_rr": p_s_rr2net["rr"],
             "curr_platform_rr": c_s_rr2net["rr"],
+            "prior_platform_net": p_s_rr2net["net"],
             "prior_rr": p_s_rr2net[rr_col],
             "curr_rr": c_s_rr2net[rr_col],
             "prior_net": p_s_rr2net[net_col],

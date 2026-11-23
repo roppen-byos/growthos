@@ -14,7 +14,8 @@
       "definition": "Number of new Rapido app installations in the reporting period. An installation does not necessarily represent a new customer: an existing customer can uninstall and reinstall the app.",
       "caveats": [
         "Counts app installations, not unique lifetime people.",
-        "Do not manufacture monthly distincts by summing shorter-period or channel distinct counts."
+        "Do not manufacture monthly distincts by summing shorter-period or channel distinct counts.",
+        "Not a city-level absolute metric: do not rank, shortlist, or compare cities on install counts. Use city installs only directionally, to describe organic-versus-paid movement."
       ]
     },
     "registrations": {
@@ -349,7 +350,8 @@
       "definition": "Registrations relative to app installations in the same reporting period.",
       "caveats": [
         "Compares period totals, not a matched install cohort; do not cap at 100%.",
-        "Aggregate approved counts before dividing; never average city ratios."
+        "Aggregate approved counts before dividing; never average city ratios.",
+        "Not a city-level metric: do not compute or report I2R per city, because installs are unreliable as a city-level absolute. National and aggregate scopes only."
       ]
     },
     "r2n": {
