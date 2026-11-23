@@ -45,7 +45,7 @@ FUNNEL_CALENDAR_SCALING_WARNING = (
     "(average daily run-rate adjustment, not literal removal of the extra calendar day); conversion rates are unaffected."
 )
 FUNNEL_OVER_EXPLAINED_WARNING = (
-    "Some funnel stages show an isolated counterfactual effect larger than the calendar-adjusted MoM FTU dip (over 100 percent); "
+    "Some funnel stages or services show an isolated effect larger than the dip (over 100 percent); "
     "other factors partly offset the dip."
 )
 FUNNEL_NATIONAL_MATCHED_WARNING = (
@@ -53,7 +53,7 @@ FUNNEL_NATIONAL_MATCHED_WARNING = (
     "do not distort MoM movement; excluded cities are disclosed in coverage."
 )
 FUNNEL_UNDETERMINED_WARNING = (
-    "Unavailable or nonpositive operands make some scopes or stages undetermined; null counts are never treated as zero."
+    "Unavailable or nonpositive operands make some scopes, stages or services undetermined; null counts are never treated as zero."
 )
 CITY_PAGE_SIZE = 25
 

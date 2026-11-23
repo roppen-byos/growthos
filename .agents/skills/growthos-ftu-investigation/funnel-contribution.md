@@ -38,6 +38,12 @@ Use this reference whenever interpreting `.venv/bin/python -m growthos investiga
     - `-5% <= reg_change_pct < 0%` (including exact `-5.00%`) -> **`below_threshold`** (`registration_dip_within_5_percent`; render plain **`FE`**).
     - `reg_change >= 0` -> **`no_registration_dip`** (`registrations_not_declining_vs_prior_month`; render plain **`FE`**).
     - Missing/nonpositive `registrations` or incomplete aggregate/matched cohort -> **`undetermined`** (render **`FE (reg. N/A)`**; strictly isolated so it never blocks `fe`, `fe2rr`, or `rr2net`).
+- **Bike / Auto / Cab service breakdown when `FE2RR` or `RR2Net` is primary (`service_breakdown`):**
+  - Triggers independently **only when `fe2rr` or `rr2net` is in `primary_stages`** (when not primary, returns `triggered: false`, `verdict: "not_triggered"`, `reason: "fe2rr_not_primary"` / `"rr2net_not_primary"`).
+  - **Threshold (`> 30%`, no `70%` cumulative cap):** flags every service strictly above **`30%`** (`> 3/10`, exact rational arithmetic, sorted descending by contribution, tie-break `bike -> auto -> cab`). There is no `70%` cumulative cap because an improving service can push two declining services above 100% each.
+  - **`FE2RR` formula (additive over shared `fe_sessions`):** `service_fe2rr = service_rr / fe_sessions`, `contribution_s = (current_service_fe2rr - prior_service_fe2rr) / (current_fe2rr - prior_fe2rr)` (invariant to calendar scaling). Non-Bike/Auto/Cab `RR` residual (e.g. `c2c`/`delivery`) is disclosed in `other_services_contribution_pct`.
+  - **`RR2Net` formula (current-`RR`-weighted against actual Platform `RR2Net` dip):** `w_s = current_service_rr / current_rr`, `r_s = service_net / service_rr`, `contribution_s = (w_s × (current_r_s − prior_r_s)) / (current_rr2net − prior_rr2net)` (invariant to calendar scaling). Discloses `mix_shift_contribution_pct` (service-mix shifts) and `other_services_contribution_pct` (non-Bike/Auto/Cab residual) when all three services share the parent cohort.
+  - **Inactive services & missing isolation:** `0` service `RR` in both months returns `not_applicable` (`no_service_volume`) rather than `undetermined`. In `FE2RR`, one-sided zero `RR` (shutdown or launch) is scored directly; in `RR2Net`, one-sided zero `RR` returns `not_applicable` (`service_absent_in_prior_month` / `service_absent_in_current_month`) and is reflected in `mix_shift_contribution_pct`. Missing (`null`) service counts are strictly isolated per service and never block sibling services or parent funnel stages.
 
 ## Stage and block verdicts
 
@@ -49,13 +55,16 @@ Render the historical funnel panel with these exact six columns:
 
 Add one concise line directly above the table: `+` means the metric contributed to FTU improvement, cushioning the FTU fall; `−` means the metric pulled FTU down and deepened the fall. Each cell is that stage's **share of the FTU dip** — not the metric's growth rate — so display the reversed sign of the CLI `contribution_pct`: a positive `contribution_pct` (stage declined) renders as `−`, a negative `contribution_pct` (stage improved) renders as `+`, and exact zero renders `0.00%`. **Bold** = selected primary issue from `> 20%` stages until cumulative `> 70%`. Counterfactual percentages omit interaction terms, are not additive, and need not sum to 100%.
 
-When `FE` is in `primary_stages`, format `FE` inline in `Primary Issues` using `registration_check`, and add a one-line footnote directly below the table listing each triggered city's exact calendar-adjusted MoM `Registrations %` (or unavailable reason) from the CLI:
+When `FE`, `FE2RR`, or `RR2Net` is in `primary_stages`, format each primary stage inline in `Primary Issues` using `registration_check` / `service_breakdown`, and add a concise footnote directly below the table listing each triggered city's exact CLI values (cal.-adj. MoM `Registrations %`, material service shares `> 30%`, `RR2Net` mix-shift or `other_services` share when relevant, or unavailable reasons):
 
-| `registration_check.verdict` | Inline `FE` label in `Primary Issues` | Meaning |
+| Follow-up verdict | Inline stage label in `Primary Issues` | Meaning |
 | --- | --- | --- |
-| `registration_dip` | **`FE (reg. issue)`** (e.g. **`RR2Net, FE (reg. issue)`**) | Cal.-adj. MoM Registrations fell strictly `> 5%` (`< -5%`) |
-| `below_threshold` / `no_registration_dip` | **`FE`** | Cal.-adj. MoM Registrations dipped `<= 5%`, stayed flat, or grew |
-| `undetermined` | **`FE (reg. N/A)`** | Registrations operand missing/nonpositive or aggregate member incomplete (`reason` disclosed in footnote) |
+| `registration_check`: `registration_dip` | **`FE (reg. issue)`** (e.g. **`RR2Net, FE (reg. issue)`**) | Cal.-adj. MoM Registrations fell strictly `> 5%` (`< -5%`) |
+| `registration_check`: `below_threshold` / `no_registration_dip` | **`FE`** | Cal.-adj. MoM Registrations dipped `<= 5%`, stayed flat, or grew |
+| `registration_check`: `undetermined` | **`FE (reg. N/A)`** | Registrations operand missing/nonpositive or aggregate member incomplete (`reason` disclosed in footnote) |
+| `service_breakdown`: `services_identified` / `partial_services_identified` | **`FE2RR (Bike, Cab)`** / **`RR2Net (Cab, Auto)`** | Services strictly `> 30%` (no `70%` cap), descending; note partial coverage in footnote if another service was `undetermined` |
+| `service_breakdown`: `no_material_service_contributor` / `partial_no_material_service` | **`FE2RR`** / **`RR2Net`** | No single service exceeded `> 30%` (cite `mix_shift_contribution_pct` / `other_services_contribution_pct` in footnote if material) |
+| `service_breakdown`: `undetermined` | **`FE2RR (service N/A)`** / **`RR2Net (service N/A)`** | All three service breakdowns unavailable (`reason` disclosed in footnote) |
 
 Stage verdicts and compact cell formatting:
 
@@ -87,13 +96,13 @@ Block verdicts and `Primary Issues (>20%, cum. >70%)` summary values:
   2. Had a material **`> 5%` calendar-adjusted MoM FTU dip**, and
   3. Are **`new_miss`** (did **not** miss prior-month FTU target by `> 5%`; `persistent` cities stop and recommend investigating `<prior_month>`).
 - For direct granular user queries naming a city, tier, group, national scope, or history, `investigate-funnel` remains directly callable without requiring the shortlist or earlier Investigation Layer checks (while still enforcing the `> 5%` calendar-adjusted MoM FTU dip gate and `> 20%` / `> 70%` selection internally).
-- Platform `RR2Net` is the final downstream stage in this workflow; Bike/Auto/Cab `RR2Net` drilldowns are intentionally deferred.
+- Bike/Auto/Cab service breakdown for primary `FE2RR` and `RR2Net` is the final downstream step in this workflow (no surge, pricing, supply, or weather attribution).
 
 ## Aggregate scopes
 
 - **Named cities:** each `--city` returns one independent block; never sum separate cities unless an explicit `--group` or `--tier` was requested.
-- **`--tier` and `--group`:** roll up counts before computing ratios. `--tier` uses the selected month's stored tier cohort. Member completeness is strict per stage and for `registration_check`: if one city lacks `Net`, only `rr2net` returns `undetermined` (`incomplete_group_member`) with `blocking_city_keys`; if one city lacks `registrations` when `fe` is primary, only `registration_check` returns `undetermined` (`incomplete_group_member`) with `blocking_city_keys`, while `fe`, `fe2rr`, and `rr2net` still evaluate.
-- **`--national`:** default when no selector is supplied; rolls up matched cities observed in both months per metric/stage (`platform_ftu`, `fe`, `fe2rr`, `rr2net`, plus `registrations` when `registration_check` is triggered). Always report `matched_city_count` and `excluded_city_count` from `coverage`.
+- **`--tier` and `--group`:** roll up counts before computing ratios. `--tier` uses the selected month's stored tier cohort. Member completeness is strict per stage, per `registration_check`, and per service: if one city lacks `Net`, only `rr2net` returns `undetermined`; if one city lacks `registrations` when `fe` is primary, only `registration_check` returns `undetermined`; if one city lacks `cab_net` when `rr2net` is primary, only `cab` returns `undetermined` (`incomplete_group_member`) with `blocking_city_keys`, while `bike`, `auto`, and all funnel stages still evaluate.
+- **`--national`:** default when no selector is supplied; rolls up matched cities observed in both months per metric/stage (`platform_ftu`, `fe`, `fe2rr`, `rr2net`, plus `registrations` and per-service `fe2rr_services` / `rr2net_services` when triggered). Always report `matched_city_count` and `excluded_city_count` from `coverage`.
 
 ## Wording guardrails
 

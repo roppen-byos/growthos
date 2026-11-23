@@ -19,7 +19,7 @@ from growthos.funnel_investigation import investigate_funnel
 
 
 def dataset(rows):
-    """Build detached MonthlyData from (month, city, tier, ftu, fe, rr, net[, registrations]) tuples."""
+    """Build detached MonthlyData from (month, city, tier, ftu, fe, rr, net[, registrations[, services]]) tuples."""
     raw = demo_payload()
     months = sorted({row[0] for row in rows})
     raw["months"] = months
@@ -37,6 +37,7 @@ def dataset(rows):
     for row in rows:
         m, city, tier, ftu, fe, rr, net = row[:7]
         regs = row[7] if len(row) > 7 else base_fact["registrations"]
+        services = row[8] if len(row) > 8 else {}
         facts.append({
             **base_fact,
             "month": m,
@@ -49,6 +50,7 @@ def dataset(rows):
             "fe_sessions": fe,
             "rr": rr,
             "net": net,
+            **services,
         })
     raw["facts"] = facts
     return validate_data(raw)
@@ -690,6 +692,292 @@ class FunnelInvestigationCalculationTests(unittest.TestCase):
         self.assertFalse(non_fe_nat["registration_check"]["triggered"])
         self.assertNotIn("registrations", non_fe_nat["coverage"])
 
+    def test_fe2rr_service_breakdown_matches_transcript_additive_math_and_no_70_cap(self):
+        # Transcript FE2RR example (20% -> 17%, -3pp) with FE flat (10,000 -> 10,000) and RR2Net flat (80%):
+        #   Prior RR=2,000: Auto 500 (5%), Bike 1,000 (10%), Cab 500 (5%)
+        #   Curr  RR=1,700: Auto 700 (7%, +2pp -> -66.67%), Bike 700 (7%, -3pp -> +100%), Cab 300 (3%, -2pp -> +66.67%)
+        # Both Bike (100%) and Cab (66.67%) are > 30% and BOTH must be returned (no 70% cap).
+        # WithOther has 100->50 non-commute RR (other_services_contribution_pct = 1/6 = +16.67%).
+        # ShutdownCab has Cab RR 300->0 in FE2RR -> scored as a real drop; LaunchCab 0->100 -> offset; ZeroCab 0->0 -> not_applicable.
+        rows = [
+            ("2026-07", "TranscriptCity", "T1", 1000, 10000, 2000, 1600, 2000,
+             {"bike_rr": 1000, "bike_net": 800, "auto_rr": 500, "auto_net": 400, "cab_rr": 500, "cab_net": 400}),
+            ("2026-08", "TranscriptCity", "T1", 850, 10000, 1700, 1360, 2000,
+             {"bike_rr": 700, "bike_net": 560, "auto_rr": 700, "auto_net": 560, "cab_rr": 300, "cab_net": 240}),
+            ("2026-07", "WithOther", "T1", 1000, 10000, 2000, 1600, 2000,
+             {"bike_rr": 1000, "bike_net": 800, "auto_rr": 600, "auto_net": 480, "cab_rr": 300, "cab_net": 240}),
+            ("2026-08", "WithOther", "T1", 850, 10000, 1700, 1360, 2000,
+             {"bike_rr": 850, "bike_net": 680, "auto_rr": 550, "auto_net": 440, "cab_rr": 250, "cab_net": 200}),
+            ("2026-07", "ShutdownCab", "T2", 1000, 10000, 2000, 1600, 2000,
+             {"bike_rr": 1000, "bike_net": 800, "auto_rr": 700, "auto_net": 560, "cab_rr": 300, "cab_net": 240}),
+            ("2026-08", "ShutdownCab", "T2", 850, 10000, 1700, 1360, 2000,
+             {"bike_rr": 1000, "bike_net": 800, "auto_rr": 700, "auto_net": 560, "cab_rr": 0, "cab_net": 0}),
+            ("2026-07", "ZeroCab", "T3", 1000, 10000, 2000, 1600, 2000,
+             {"bike_rr": 1200, "bike_net": 960, "auto_rr": 800, "auto_net": 640, "cab_rr": 0, "cab_net": 0}),
+            ("2026-08", "ZeroCab", "T3", 850, 10000, 1700, 1360, 2000,
+             {"bike_rr": 1000, "bike_net": 800, "auto_rr": 700, "auto_net": 560, "cab_rr": 0, "cab_net": 0}),
+        ]
+        result = investigate_funnel(
+            dataset(rows),
+            requested_months=["2026-08"],
+            cities=["TranscriptCity", "WithOther", "ShutdownCab", "ZeroCab"],
+        )
+        self.assertEqual(result["thresholds"]["service_contributor_above_pct"], 30)
+        self.assertNotIn(FUNNEL_UNDETERMINED_WARNING, result["warnings"])
+
+        tr = only(result, "city", "TranscriptCity")
+        self.assertEqual(tr["primary_stages"], ["fe2rr"])
+        fb = tr["service_breakdown"]["fe2rr"]
+        self.assertTrue(fb["triggered"])
+        self.assertEqual(fb["verdict"], "services_identified")
+        self.assertEqual(fb["material_services"], ["bike", "cab"])
+        self.assertAlmostEqual(fb["platform_rate_delta_pp"], -3.0)
+        self.assertAlmostEqual(fb["other_services_contribution_pct"], 0.0)
+        self.assertAlmostEqual(fb["services"]["bike"]["contribution_pct"], 100.0)
+        self.assertAlmostEqual(fb["services"]["cab"]["contribution_pct"], 200 / 3)
+        self.assertAlmostEqual(fb["services"]["auto"]["contribution_pct"], -200 / 3)
+        self.assertEqual(fb["services"]["auto"]["verdict"], "no_service_deterioration")
+        self.assertFalse(tr["service_breakdown"]["rr2net"]["triggered"])
+        self.assertEqual(tr["service_breakdown"]["rr2net"]["reason"], "rr2net_not_primary")
+
+        wo = only(result, "city", "WithOther")["service_breakdown"]["fe2rr"]
+        self.assertAlmostEqual(wo["services"]["bike"]["contribution_pct"], 50.0)
+        self.assertAlmostEqual(wo["services"]["auto"]["contribution_pct"], 50 / 3)
+        self.assertAlmostEqual(wo["services"]["cab"]["contribution_pct"], 50 / 3)
+        self.assertAlmostEqual(wo["other_services_contribution_pct"], 50 / 3)
+        self.assertEqual(wo["material_services"], ["bike"])
+
+        sd = only(result, "city", "ShutdownCab")["service_breakdown"]["fe2rr"]
+        self.assertEqual(sd["material_services"], ["cab"])
+        self.assertAlmostEqual(sd["services"]["cab"]["contribution_pct"], 100.0)
+
+        zc = only(result, "city", "ZeroCab")["service_breakdown"]["fe2rr"]
+        self.assertEqual(zc["verdict"], "services_identified")
+        self.assertEqual(zc["material_services"], ["bike", "auto"])
+        self.assertEqual((zc["services"]["cab"]["verdict"], zc["services"]["cab"]["reason"]),
+                         ("not_applicable", "no_service_volume"))
+        self.assertIsNone(zc["services"]["cab"]["contribution_pct"])
+
+    def test_rr2net_service_breakdown_matches_transcript_offsetting_and_mix_shift(self):
+        # Transcript offsetting case (Month 1 & Month 2 RR=1360: Bike 700, Auto 400, Cab 260, so mix shift = 0):
+        #   Bike RR2Net 50% -> 60% (+10pp, weighted +70/1360 -> -127.27%)
+        #   Auto RR2Net 60% -> 45% (-15pp, weighted -60/1360 -> +109.09%, over_explained)
+        #   Cab  RR2Net 70% -> 45% (-25pp, weighted -65/1360 -> +118.18%, over_explained)
+        #   Platform RR2Net: 772/1360 -> 717/1360 (delta = -55/1360 = -4.0441pp; relative -7.12% -> FTU -7% -> 100% RR2Net)
+        # MixShiftCity: Bike 80%->80% (share 50%->40%), Auto 50%->40% (+25% <= 30%), Cab 35%->20% (+37.5% > 30%), mix +37.5%.
+        # PureMixCity: Bike 80%->80% (share 80%->40%), Cab 40%->40% (share 20%->60%) -> 0% rates, 100% mix shift!
+        rows = [
+            ("2026-07", "OffsetCity", "T1", 1000, 10000, 1360, 772, 2000,
+             {"bike_rr": 700, "bike_net": 350, "auto_rr": 400, "auto_net": 240, "cab_rr": 260, "cab_net": 182}),
+            ("2026-08", "OffsetCity", "T1", 900, 10000, 1360, 717, 2000,
+             {"bike_rr": 700, "bike_net": 420, "auto_rr": 400, "auto_net": 180, "cab_rr": 260, "cab_net": 117}),
+            ("2026-07", "MixShiftCity", "T1", 1000, 10000, 1000, 620, 2000,
+             {"bike_rr": 500, "bike_net": 400, "auto_rr": 300, "auto_net": 150, "cab_rr": 200, "cab_net": 70}),
+            ("2026-08", "MixShiftCity", "T1", 800, 10000, 1000, 500, 2000,
+             {"bike_rr": 400, "bike_net": 320, "auto_rr": 300, "auto_net": 120, "cab_rr": 300, "cab_net": 60}),
+            ("2026-07", "PureMixCity", "T1", 1000, 10000, 1000, 720, 2000,
+             {"bike_rr": 800, "bike_net": 640, "auto_rr": 0, "auto_net": 0, "cab_rr": 200, "cab_net": 80}),
+            ("2026-08", "PureMixCity", "T1", 800, 10000, 1000, 560, 2000,
+             {"bike_rr": 400, "bike_net": 320, "auto_rr": 0, "auto_net": 0, "cab_rr": 600, "cab_net": 240}),
+        ]
+        result = investigate_funnel(
+            dataset(rows),
+            requested_months=["2026-08"],
+            cities=["OffsetCity", "MixShiftCity", "PureMixCity"],
+        )
+        self.assertIn(FUNNEL_OVER_EXPLAINED_WARNING, result["warnings"])
+        self.assertNotIn(FUNNEL_UNDETERMINED_WARNING, result["warnings"])
+
+        off = only(result, "city", "OffsetCity")
+        self.assertEqual(off["primary_stages"], ["rr2net"])
+        rb = off["service_breakdown"]["rr2net"]
+        self.assertTrue(rb["triggered"])
+        self.assertEqual(rb["verdict"], "services_identified")
+        self.assertEqual(rb["material_services"], ["cab", "auto"])
+        self.assertEqual(rb["flags"], ["over_explained"])
+        self.assertAlmostEqual(rb["services"]["cab"]["contribution_pct"], 6500 / 55)
+        self.assertAlmostEqual(rb["services"]["auto"]["contribution_pct"], 6000 / 55)
+        self.assertAlmostEqual(rb["services"]["bike"]["contribution_pct"], -7000 / 55)
+        self.assertEqual(rb["services"]["bike"]["verdict"], "no_service_deterioration")
+        self.assertAlmostEqual(rb["mix_shift_contribution_pct"], 0.0)
+        self.assertAlmostEqual(rb["other_services_contribution_pct"], 0.0)
+
+        ms = only(result, "city", "MixShiftCity")["service_breakdown"]["rr2net"]
+        self.assertEqual(ms["verdict"], "services_identified")
+        self.assertEqual(ms["material_services"], ["cab"])
+        self.assertAlmostEqual(ms["services"]["bike"]["contribution_pct"], 0.0)
+        self.assertEqual(ms["services"]["bike"]["verdict"], "no_service_deterioration")
+        self.assertAlmostEqual(ms["services"]["auto"]["contribution_pct"], 25.0)
+        self.assertEqual(ms["services"]["auto"]["verdict"], "below_threshold")
+        self.assertAlmostEqual(ms["services"]["cab"]["contribution_pct"], 37.5)
+        self.assertEqual(ms["services"]["cab"]["verdict"], "material_contributor")
+        self.assertAlmostEqual(ms["mix_shift_contribution_pct"], 37.5)
+        self.assertAlmostEqual(ms["other_services_contribution_pct"], 0.0)
+
+        pm = only(result, "city", "PureMixCity")["service_breakdown"]["rr2net"]
+        self.assertEqual(pm["verdict"], "no_material_service_contributor")
+        self.assertEqual(pm["material_services"], [])
+        self.assertEqual((pm["services"]["auto"]["verdict"], pm["services"]["auto"]["reason"]),
+                         ("not_applicable", "no_service_volume"))
+        self.assertAlmostEqual(pm["mix_shift_contribution_pct"], 100.0)
+        self.assertAlmostEqual(pm["other_services_contribution_pct"], 0.0)
+
+    def test_service_breakdown_strict_thirty_percent_boundary_at_64_bit_precision(self):
+        # Exact30FE2RR: platform FE2RR drops 1000/10000 (-10pp); bike drops 300/10000 (-3pp -> exact 30.0% -> below_threshold).
+        # JustOver30FE2RR: at 10^15 scale, bike drops 3*10^14 + 1 out of 10^15 -> strictly > 30% -> material_contributor!
+        # Exact30RR2Net: RR=1000 constant; bike RR=500 drops 6pp (weighted -3pp out of -10pp -> exact 30.0% -> below_threshold).
+        # JustOver30RR2Net: at 10^15 scale, bike net drops 3*10^14 + 1 out of 10^15 -> strictly > 30% -> material_contributor!
+        base = 10**15
+        rows = [
+            ("2026-07", "Exact30FE2RR", "T1", 1000, 10000, 2000, 1600, 2000,
+             {"bike_rr": 1000, "bike_net": 800, "auto_rr": 1000, "auto_net": 800, "cab_rr": 0, "cab_net": 0}),
+            ("2026-08", "Exact30FE2RR", "T1", 800, 10000, 1000, 800, 2000,
+             {"bike_rr": 700, "bike_net": 560, "auto_rr": 300, "auto_net": 240, "cab_rr": 0, "cab_net": 0}),
+            ("2026-07", "JustOver30FE2RR", "T1", 1000, 10 * base, 2 * base, base, 2000,
+             {"bike_rr": base, "bike_net": base // 2, "auto_rr": base, "auto_net": base // 2, "cab_rr": 0, "cab_net": 0}),
+            ("2026-08", "JustOver30FE2RR", "T1", 800, 10 * base, base, base // 2, 2000,
+             {"bike_rr": 7 * 10**14 - 1, "bike_net": 3 * 10**14, "auto_rr": 3 * 10**14 + 1, "auto_net": 2 * 10**14, "cab_rr": 0, "cab_net": 0}),
+            ("2026-07", "Exact30RR2Net", "T1", 1000, 10000, 1000, 800, 2000,
+             {"bike_rr": 500, "bike_net": 400, "auto_rr": 500, "auto_net": 400, "cab_rr": 0, "cab_net": 0}),
+            ("2026-08", "Exact30RR2Net", "T1", 800, 10000, 1000, 700, 2000,
+             {"bike_rr": 500, "bike_net": 370, "auto_rr": 500, "auto_net": 330, "cab_rr": 0, "cab_net": 0}),
+            ("2026-07", "JustOver30RR2Net", "T1", 1000, 10 * base, 10 * base, 8 * base, 2000,
+             {"bike_rr": 5 * base, "bike_net": 4 * base, "auto_rr": 5 * base, "auto_net": 4 * base, "cab_rr": 0, "cab_net": 0}),
+            ("2026-08", "JustOver30RR2Net", "T1", 800, 10 * base, 10 * base, 7 * base, 2000,
+             {"bike_rr": 5 * base, "bike_net": 37 * 10**14 - 1, "auto_rr": 5 * base, "auto_net": 33 * 10**14 + 1, "cab_rr": 0, "cab_net": 0}),
+        ]
+        result = investigate_funnel(
+            dataset(rows),
+            requested_months=["2026-08"],
+            cities=["Exact30FE2RR", "JustOver30FE2RR", "Exact30RR2Net", "JustOver30RR2Net"],
+        )
+
+        e_fe2rr = only(result, "city", "Exact30FE2RR")["service_breakdown"]["fe2rr"]
+        self.assertEqual(e_fe2rr["services"]["bike"]["contribution_pct"], 30.0)
+        self.assertEqual(e_fe2rr["services"]["bike"]["verdict"], "below_threshold")
+        self.assertEqual(e_fe2rr["material_services"], ["auto"])
+
+        o_fe2rr = only(result, "city", "JustOver30FE2RR")["service_breakdown"]["fe2rr"]
+        self.assertEqual(o_fe2rr["services"]["bike"]["verdict"], "material_contributor")
+        self.assertEqual(o_fe2rr["material_services"], ["auto", "bike"])
+
+        e_rr2net = only(result, "city", "Exact30RR2Net")["service_breakdown"]["rr2net"]
+        self.assertEqual(e_rr2net["services"]["bike"]["contribution_pct"], 30.0)
+        self.assertEqual(e_rr2net["services"]["bike"]["verdict"], "below_threshold")
+        self.assertEqual(e_rr2net["material_services"], ["auto"])
+
+        o_rr2net = only(result, "city", "JustOver30RR2Net")["service_breakdown"]["rr2net"]
+        self.assertEqual(o_rr2net["services"]["bike"]["verdict"], "material_contributor")
+        self.assertEqual(o_rr2net["material_services"], ["auto", "bike"])
+
+    def test_service_breakdown_one_sided_zero_and_isolated_nulls(self):
+        # LaunchCabRR2Net: cab launched in Aug (0->200 RR, 0->40 Net at 20%), bike flat 80% -> cab is service_absent_in_prior_month,
+        #   mix_shift_contribution_pct == 100.0, no undetermined warning.
+        # NullCabCity: cab_net is None in Aug -> only cab is undetermined (missing_current_cab_net), bike & auto still evaluate.
+        # NonPrimaryNullSvc: FE drove 100% of dip (fe2rr & rr2net flat), all service counts None -> not_triggered & no warning!
+        rows = [
+            ("2026-07", "LaunchCabRR2Net", "T2", 1000, 10000, 1000, 800, 2000,
+             {"bike_rr": 1000, "bike_net": 800, "auto_rr": 0, "auto_net": 0, "cab_rr": 0, "cab_net": 0}),
+            ("2026-08", "LaunchCabRR2Net", "T2", 800, 10000, 1000, 680, 2000,
+             {"bike_rr": 800, "bike_net": 640, "auto_rr": 0, "auto_net": 0, "cab_rr": 200, "cab_net": 40}),
+            ("2026-07", "NullCabCity", "T2", 1000, 10000, 1000, 800, 2000,
+             {"bike_rr": 600, "bike_net": 480, "auto_rr": 300, "auto_net": 240, "cab_rr": 100, "cab_net": 80}),
+            ("2026-08", "NullCabCity", "T2", 800, 10000, 1000, 640, 2000,
+             {"bike_rr": 600, "bike_net": 360, "auto_rr": 300, "auto_net": 210, "cab_rr": 100, "cab_net": None}),
+        ]
+        clean = investigate_funnel(dataset(rows), requested_months=["2026-08"], cities=["LaunchCabRR2Net"])
+        self.assertNotIn(FUNNEL_UNDETERMINED_WARNING, clean["warnings"])
+        lc = only(clean, "city", "LaunchCabRR2Net")["service_breakdown"]["rr2net"]
+        self.assertEqual((lc["services"]["cab"]["verdict"], lc["services"]["cab"]["reason"]),
+                         ("not_applicable", "service_absent_in_prior_month"))
+        self.assertAlmostEqual(lc["mix_shift_contribution_pct"], 100.0)
+
+        partial = investigate_funnel(dataset(rows), requested_months=["2026-08"], cities=["NullCabCity"])
+        self.assertIn(FUNNEL_UNDETERMINED_WARNING, partial["warnings"])
+        nc = only(partial, "city", "NullCabCity")
+        self.assertEqual(nc["verdict"], "contributors_identified")
+        self.assertEqual(nc["primary_stages"], ["rr2net"])
+        nc_rb = nc["service_breakdown"]["rr2net"]
+        self.assertEqual(nc_rb["verdict"], "partial_services_identified")
+        self.assertEqual(nc_rb["material_services"], ["bike"])
+        self.assertAlmostEqual(nc_rb["services"]["bike"]["contribution_pct"], 75.0)
+        self.assertAlmostEqual(nc_rb["services"]["auto"]["contribution_pct"], 18.75)
+        self.assertEqual((nc_rb["services"]["cab"]["verdict"], nc_rb["services"]["cab"]["reason"]),
+                         ("undetermined", "missing_current_cab_net"))
+        self.assertIsNone(nc_rb["mix_shift_contribution_pct"])
+
+        non_primary_rows = [
+            ("2026-07", "FeOnlyCity", "T1", 1000, 10000, 5000, 4000, 2000,
+             {"bike_rr": None, "bike_net": None, "auto_rr": None, "auto_net": None, "cab_rr": None, "cab_net": None}),
+            ("2026-08", "FeOnlyCity", "T1", 800, 8000, 4000, 3200, 1600,
+             {"bike_rr": None, "bike_net": None, "auto_rr": None, "auto_net": None, "cab_rr": None, "cab_net": None}),
+        ]
+        non_primary = investigate_funnel(dataset(non_primary_rows), requested_months=["2026-08"], cities=["FeOnlyCity"])
+        self.assertNotIn(FUNNEL_UNDETERMINED_WARNING, non_primary["warnings"])
+        np_block = only(non_primary, "city", "FeOnlyCity")
+        self.assertEqual(np_block["primary_stages"], ["fe"])
+        self.assertFalse(np_block["service_breakdown"]["fe2rr"]["triggered"])
+        self.assertFalse(np_block["service_breakdown"]["rr2net"]["triggered"])
+
+    def test_service_breakdown_tier_group_and_national_scopes(self):
+        # T2 has Alpha and Bravo; Bravo has null cab_net -> blocks only cab in T2 rr2net breakdown while bike/auto evaluate.
+        # PairOk has Alpha + Charlie (complete) -> rolls up counts before computing service weights/rates.
+        # National excludes Delta (Aug-only) and exposes coverage["rr2net_services"] only when triggered.
+        rows = [
+            ("2026-07", "Alpha", "T2", 600, 6000, 600, 480, 1000,
+             {"bike_rr": 300, "bike_net": 240, "auto_rr": 200, "auto_net": 160, "cab_rr": 100, "cab_net": 80}),
+            ("2026-07", "Bravo", "T2", 400, 4000, 400, 320, 1000,
+             {"bike_rr": 200, "bike_net": 160, "auto_rr": 100, "auto_net": 80, "cab_rr": 100, "cab_net": 80}),
+            ("2026-08", "Alpha", "T2", 480, 6000, 600, 384, 1000,
+             {"bike_rr": 300, "bike_net": 168, "auto_rr": 200, "auto_net": 144, "cab_rr": 100, "cab_net": 72}),
+            ("2026-08", "Bravo", "T2", 320, 4000, 400, 256, 1000,
+             {"bike_rr": 200, "bike_net": 112, "auto_rr": 100, "auto_net": 72, "cab_rr": 100, "cab_net": None}),
+            ("2026-07", "Charlie", "T1", 400, 4000, 400, 320, 1000,
+             {"bike_rr": 200, "bike_net": 160, "auto_rr": 100, "auto_net": 80, "cab_rr": 100, "cab_net": 80}),
+            ("2026-08", "Charlie", "T1", 320, 4000, 400, 256, 1000,
+             {"bike_rr": 200, "bike_net": 112, "auto_rr": 100, "auto_net": 72, "cab_rr": 100, "cab_net": 72}),
+            ("2026-08", "Delta", "T3", 500, 50000, 25000, 20000, 9000,
+             {"bike_rr": 15000, "bike_net": 12000, "auto_rr": 5000, "auto_net": 4000, "cab_rr": 5000, "cab_net": 4000}),
+        ]
+        result = investigate_funnel(
+            dataset(rows),
+            requested_months=["2026-08"],
+            tier="T2",
+            groups=[("PairOk", ["Alpha", "Charlie"])],
+            national=True,
+        )
+        t2 = only(result, "tier", "T2")
+        self.assertEqual(t2["primary_stages"], ["rr2net"])
+        t2_rb = t2["service_breakdown"]["rr2net"]
+        self.assertEqual(t2_rb["verdict"], "partial_services_identified")
+        self.assertEqual(t2_rb["material_services"], ["bike"])
+        self.assertEqual(t2_rb["services"]["cab"]["verdict"], "undetermined")
+        self.assertEqual(t2_rb["services"]["cab"]["blocking_city_keys"], ["bravo"])
+        self.assertEqual(t2_rb["blocking_city_keys"], ["bravo"])
+        self.assertEqual(t2["coverage"]["rr2net_service_blocked_city_counts"], {"bike": 0, "auto": 0, "cab": 1})
+        self.assertNotIn("fe2rr_service_blocked_city_counts", t2["coverage"])
+        member_drivers = {m["city"]: m["rr2net_service_drivers"] for m in t2["members"]}
+        self.assertEqual(member_drivers, {"Alpha": ["bike"], "Bravo": ["bike"]})
+
+        pair = only(result, "group", "PairOk")
+        pair_rb = pair["service_breakdown"]["rr2net"]
+        self.assertEqual(pair_rb["verdict"], "services_identified")
+        self.assertEqual(pair_rb["material_services"], ["bike"])
+        self.assertAlmostEqual(pair_rb["services"]["bike"]["contribution_pct"], 75.0)
+        self.assertAlmostEqual(pair_rb["services"]["auto"]["contribution_pct"], 15.0)
+        self.assertAlmostEqual(pair_rb["services"]["cab"]["contribution_pct"], 10.0)
+        self.assertAlmostEqual(pair_rb["mix_shift_contribution_pct"], 0.0)
+        self.assertAlmostEqual(pair_rb["other_services_contribution_pct"], 0.0)
+
+        nat = only(result, "national")
+        nat_rb = nat["service_breakdown"]["rr2net"]
+        self.assertTrue(nat_rb["triggered"])
+        self.assertEqual(nat_rb["material_services"], ["bike"])
+        self.assertEqual(nat["coverage"]["rr2net_services"]["bike"]["matched_city_count"], 3)
+        self.assertEqual(nat["coverage"]["rr2net_services"]["cab"]["matched_city_count"], 2)
+        self.assertIsNone(nat_rb["mix_shift_contribution_pct"])
+        self.assertNotIn("fe2rr_services", nat["coverage"])
+
 
 class FunnelInvestigationCliTests(unittest.TestCase):
     def invoke(self, arguments, data=None):
@@ -728,6 +1016,25 @@ class FunnelInvestigationCliTests(unittest.TestCase):
         self.assertEqual(result2["stages"], ["fe2rr"])
         self.assertEqual(list(result2["blocks"][0]["stages"]), ["fe2rr"])
         self.assertEqual(result2["blocks"][0]["registration_check"]["verdict"], "not_triggered")
+        self.assertEqual(result2["blocks"][0]["service_breakdown"]["fe2rr"]["verdict"], "not_triggered")
+        self.assertEqual(result2["blocks"][0]["service_breakdown"]["rr2net"]["verdict"], "not_triggered")
+
+    def test_cli_surfaces_service_breakdown_when_fe2rr_or_rr2net_is_primary(self):
+        rows = [
+            ("2026-07", "Alpha", "T1", 1000, 10000, 2000, 1600, 2000,
+             {"bike_rr": 1000, "bike_net": 800, "auto_rr": 500, "auto_net": 400, "cab_rr": 500, "cab_net": 400}),
+            ("2026-08", "Alpha", "T1", 850, 10000, 1700, 1360, 2000,
+             {"bike_rr": 700, "bike_net": 560, "auto_rr": 700, "auto_net": 560, "cab_rr": 300, "cab_net": 240}),
+        ]
+        code, result = self.invoke(
+            ["investigate-funnel", "--month", "2026-08", "--city", "Alpha"],
+            data=dataset(rows),
+        )
+        self.assertEqual(code, 0)
+        sb = result["blocks"][0]["service_breakdown"]
+        self.assertTrue(sb["fe2rr"]["triggered"])
+        self.assertEqual(sb["fe2rr"]["material_services"], ["bike", "cab"])
+        self.assertFalse(sb["rr2net"]["triggered"])
 
     def test_invalid_selectors_fail_before_reader_and_never_echo_inputs(self):
         with patch("growthos.cli.connect_reader") as reader:

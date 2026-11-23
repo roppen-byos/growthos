@@ -339,10 +339,10 @@ A contribution or month-on-month registration dip in the worsening direction tha
 `FE` is a primary issue, but calendar-adjusted month-on-month Registrations stayed flat or grew, so the `FE` drop is not accompanied by a registration volume drop.
 
 **`not_triggered`**:
-A conditional follow-up check did not run because its trigger condition was not met (for example, the month-on-month Registration check when `FE` is not a primary issue).
+A conditional follow-up check did not run because its trigger condition was not met (for example, the month-on-month Registration check when `FE` is not primary, or a service breakdown when `FE2RR`/`RR2Net` is not primary).
 
 **`not_applicable`**:
-The check does not apply — for Step 1 when FTU met its target, for Step 2 when there was no material dip.
+The check does not apply — for Step 1 when FTU met its target, for Step 2 when there was no material dip, or for a service with zero volume in one or both months.
 
 **`no_historical_ftu_dip`**:
 FTU did not fall month over month after calendar adjustment; funnel decomposition does not apply.
@@ -369,10 +369,25 @@ There is a material dip, but no stage clears the stage floor; only a partial exp
 There is a material dip, but no stage contributes materially at all.
 
 **`material_contributor`**:
-A Funnel Stage contributing more than the configured stage floor to the FTU change; eligible for primary-issue selection.
+A Funnel Stage or service contributing more than its configured materiality floor to the dip; eligible for primary selection (stages) or flagged directly (services).
 
 **`no_stage_deterioration`**:
 A Funnel Stage did not worsen month over month, so it is not a contributor.
+
+**`services_identified`**:
+Service breakdown for a primary `FE2RR` or `RR2Net` stage found at least one Bike, Auto, or Cab contributor above the configured service floor, with all services evaluated.
+
+**`partial_services_identified`**:
+Service breakdown found at least one Bike, Auto, or Cab contributor above the configured service floor while another service was undetermined.
+
+**`partial_no_material_service`**:
+No evaluated service cleared the service floor while another service was undetermined.
+
+**`no_material_service_contributor`**:
+All evaluated services stayed at or below the configured service floor (for example, spread across services, driven by service mix shift, or coming from non-commute services).
+
+**`no_service_deterioration`**:
+A service stayed flat or improved month over month, so it helped offset rather than deepen the stage dip.
 
 **`undetermined`**:
 A required month, target, observation, or positive operand is unavailable; the reason is disclosed and nothing is inferred.

@@ -4,8 +4,10 @@ Calculation-only: no database, filesystem or CLI access. Evaluates FE sessions,
 FE2RR and RR2Net independently against a material (> 5%) calendar-adjusted MoM
 Platform FTU dip via hold-two-constant counterfactual proxies using exact rational
 arithmetic, selects > 20% stages descending until cumulative contribution
-exceeds > 70%, and checks calendar-adjusted MoM Registrations (> 5% dip) when
-FE is selected as a primary stage; floats are presentation only.
+exceeds > 70%, checks calendar-adjusted MoM Registrations (> 5% dip) when FE is
+primary, and breaks down Bike/Auto/Cab drivers (> 30%, no cumulative cap) when
+FE2RR (additive) or RR2Net (current-RR-weighted) is primary; floats are
+presentation only.
 """
 
 from __future__ import annotations
@@ -30,7 +32,15 @@ MATERIAL_THRESHOLD = Fraction(1, 5)
 CUMULATIVE_ISSUE_THRESHOLD = Fraction(7, 10)
 FTU_DIP_THRESHOLD = Fraction(-1, 20)
 REG_DIP_THRESHOLD = Fraction(-1, 20)
+SERVICE_MATERIAL_THRESHOLD = Fraction(3, 10)
 STAGE_RANK = {"fe": 0, "fe2rr": 1, "rr2net": 2}
+SERVICES = ("bike", "auto", "cab")
+SERVICE_RANK = {"bike": 0, "auto": 1, "cab": 2}
+SERVICE_FIELDS = {
+    "bike": ("bike_rr", "bike_net"),
+    "auto": ("auto_rr", "auto_net"),
+    "cab": ("cab_rr", "cab_net"),
+}
 MEMBER_PAGE_SIZE = 25
 
 METHOD = {
@@ -38,7 +48,7 @@ METHOD = {
     "calendar_adjustment": (
         "Proportional shorter-month scaling: volume counts (Platform FTU, Registrations, FE sessions, RR, Net) "
         "in the longer month are scaled by min(prior_days, current_days) / month_days. "
-        "Conversion rates FE2RR and RR2Net are unaffected."
+        "Conversion rates FE2RR, RR2Net, and service-level breakdowns are unaffected."
     ),
     "ftu_change": "current_ftu_scaled - prior_ftu_scaled (negative indicates an FTU dip)",
     "ftu_dip_rule": "ftu_change / prior_ftu_scaled < -5% (strict > 5% calendar-adjusted MoM FTU dip; exact rational test)",
@@ -61,12 +71,39 @@ METHOD = {
         "exact rational test). Independent of Step 1's same-month Registration target check; "
         "missing or nonpositive registrations affect only registration_check and never block funnel stages."
     ),
+    "service_breakdown": {
+        "trigger": "Triggered independently when fe2rr or rr2net is in primary_stages.",
+        "services": list(SERVICES),
+        "material_threshold_pct": 30,
+        "cumulative_cap": None,
+        "selection_rule": (
+            "Select every service strictly > 30% (no 70% cumulative cap so offsetting service "
+            "gains cannot hide a second declining service), sorted descending by exact contribution."
+        ),
+        "fe2rr_formula": (
+            "Additive over shared fe_sessions: service_fe2rr = service_rr / fe_sessions; "
+            "contribution = (current_service_fe2rr - prior_service_fe2rr) / (current_fe2rr - prior_fe2rr). "
+            "Residual non-Bike/Auto/Cab RR (e.g. c2c/delivery) is disclosed in other_services_contribution_pct."
+        ),
+        "rr2net_formula": (
+            "Current-RR-weighted rate effect against actual Platform RR2Net change: "
+            "w_s = current_service_rr / current_rr; r_s = service_net / service_rr; "
+            "contribution = (w_s * (current_r_s - prior_r_s)) / (current_rr2net - prior_rr2net). "
+            "Service mix shift and non-Bike/Auto/Cab residuals are disclosed in "
+            "mix_shift_contribution_pct and other_services_contribution_pct."
+        ),
+        "inactive_service_handling": (
+            "Zero service RR in both months returns not_applicable (no_service_volume); one-sided zero "
+            "RR in RR2Net returns not_applicable (service_absent_in_prior_month / service_absent_in_current_month) "
+            "and is reflected in mix_shift_contribution_pct. Missing counts are strictly isolated per service."
+        ),
+    },
     "threshold_comparison": "strictly_greater_than",
     "arithmetic": "exact rational; float fields are presentation only",
     "population_scope": (
-        "FTU-eligible city funnel counts from irf.facts (FE sessions, RR, Net for days on or before a customer's "
-        "first completed platform ride plus Zero-Transaction customers), applied as scale-invariant "
-        "hold-two-constant relative-change counterfactuals to scaled Platform FTU."
+        "FTU-eligible city funnel counts from irf.facts (FE sessions, RR, Net, and Bike/Auto/Cab RR & Net "
+        "for days on or before a customer's first completed platform ride plus Zero-Transaction customers), "
+        "applied as scale-invariant hold-two-constant relative-change counterfactuals to scaled Platform FTU."
     ),
     "interpretation": (
         "Independent counterfactual decomposition of a material (> 5%) calendar-adjusted MoM Platform FTU dip. "
@@ -83,9 +120,10 @@ THRESHOLDS = {
     "ftu_dip": "ftu_change / prior_ftu_scaled < -5% (strict)",
     "registration_dip_below_pct": -5,
     "registration_dip": "reg_change / prior_reg_scaled < -5% (strict; triggered only when fe is in primary_stages)",
+    "service_contributor_above_pct": 30,
+    "service_drilldown": "triggered_when_fe2rr_or_rr2net_in_primary_stages_above_30_pct_no_cumulative_cap",
     "registration_gate": "registration_target_shortfall_check_above_70_stops_before_funnel",
     "persistence_gate": "month_on_month_dip_persistence_check_persistent_prior_month_stops_before_funnel",
-    "service_drilldown": "deferred_stop_at_platform_rr2net",
 }
 
 
@@ -485,6 +523,329 @@ def _evaluate_registration_check(
     }
 
 
+def _classify_service_contribution(contribution: Fraction) -> tuple[str, str | None, bool, list[str]]:
+    if contribution <= 0:
+        return "no_service_deterioration", "service_not_deteriorating", False, []
+    flags = ["over_explained"] if contribution > 1 else []
+    if contribution > SERVICE_MATERIAL_THRESHOLD:
+        return "material_contributor", None, True, flags
+    return "below_threshold", "contribution_at_or_below_threshold", False, flags
+
+
+def _service_breakdown_verdict(
+    service_results: dict[str, dict],
+) -> tuple[str, str | None, list[str], list[str], list[str]]:
+    material_services = sorted(
+        (svc for svc in SERVICES if service_results[svc]["verdict"] == "material_contributor"),
+        key=lambda svc: (-service_results[svc]["_contribution"], SERVICE_RANK[svc]),
+    )
+    undetermined_services = [
+        svc for svc in SERVICES if service_results[svc]["verdict"] == "undetermined"
+    ]
+    flags = sorted({flag for item in service_results.values() for flag in item["flags"]})
+    blocking = sorted({key for item in service_results.values() for key in item["blocking_city_keys"]})
+    if material_services:
+        verdict = "services_identified" if not undetermined_services else "partial_services_identified"
+        reason = None
+    elif len(undetermined_services) == len(SERVICES):
+        verdict, reason = "undetermined", "all_services_undetermined"
+    elif undetermined_services:
+        verdict, reason = "partial_no_material_service", None
+    else:
+        verdict, reason = "no_material_service_contributor", None
+    return verdict, reason, material_services, flags, blocking
+
+
+def _public_service(item: dict) -> dict:
+    return {key: value for key, value in item.items() if not key.startswith("_")}
+
+
+def _evaluate_fe2rr_services(
+    *,
+    triggered: bool,
+    prior_fe: int | None,
+    curr_fe: int | None,
+    prior_rr: int | None,
+    curr_rr: int | None,
+    service_inputs: dict[str, dict],
+    same_cohort: bool,
+) -> dict:
+    if not triggered:
+        return {
+            "triggered": False,
+            "method": "additive_fe2rr_delta",
+            "verdict": "not_triggered",
+            "reason": "fe2rr_not_primary",
+            "material_services": [],
+            "flags": [],
+            "platform_rate_delta_pp": None,
+            "other_services_contribution_pct": None,
+            "services": {},
+            "blocking_city_keys": [],
+        }
+
+    p_platform = _rate(prior_rr, prior_fe)
+    c_platform = _rate(curr_rr, curr_fe)
+    platform_delta = None if p_platform is None or c_platform is None else c_platform - p_platform
+
+    results: dict[str, dict] = {}
+    for svc in SERVICES:
+        inp = service_inputs[svc]
+        s_prior_fe, s_curr_fe = inp["prior_fe"], inp["curr_fe"]
+        s_prior_rr, s_curr_rr = inp["prior_rr"], inp["curr_rr"]
+        override_reason = inp["override_reason"]
+        blocking_keys = list(inp["blocking_keys"])
+
+        p_rate = _rate(s_prior_rr, s_prior_fe)
+        c_rate = _rate(s_curr_rr, s_curr_fe)
+        rate_delta = None if p_rate is None or c_rate is None else c_rate - p_rate
+        contribution: Fraction | None = None
+        flags: list[str] = []
+
+        if override_reason is not None:
+            verdict, reason, material = "undetermined", override_reason, None
+        elif s_prior_fe is None:
+            verdict, reason, material = "undetermined", "missing_prior_fe_sessions", None
+        elif s_curr_fe is None:
+            verdict, reason, material = "undetermined", "missing_current_fe_sessions", None
+        elif s_prior_rr is None:
+            verdict, reason, material = "undetermined", f"missing_prior_{svc}_rr", None
+        elif s_curr_rr is None:
+            verdict, reason, material = "undetermined", f"missing_current_{svc}_rr", None
+        elif s_prior_fe <= 0:
+            verdict, reason, material = "undetermined", "nonpositive_prior_fe_sessions", None
+        elif s_curr_fe <= 0:
+            verdict, reason, material = "undetermined", "nonpositive_current_fe_sessions", None
+        elif s_prior_rr < 0:
+            verdict, reason, material = "undetermined", f"negative_prior_{svc}_rr", None
+        elif s_curr_rr < 0:
+            verdict, reason, material = "undetermined", f"negative_current_{svc}_rr", None
+        elif s_prior_rr == 0 and s_curr_rr == 0:
+            verdict, reason, material = "not_applicable", "no_service_volume", False
+        elif platform_delta is None or platform_delta >= 0:
+            verdict, reason, material = "not_applicable", "no_fe2rr_dip", False
+        elif rate_delta is None:
+            verdict, reason, material = "undetermined", "contribution_unavailable", None
+        else:
+            contribution = rate_delta / platform_delta
+            verdict, reason, material, flags = _classify_service_contribution(contribution)
+
+        results[svc] = {
+            "service": svc,
+            "prior_rr_raw": s_prior_rr,
+            "current_rr_raw": s_curr_rr,
+            "prior_value": None if p_rate is None else float(p_rate),
+            "current_value": None if c_rate is None else float(c_rate),
+            "rate_delta_pp": None if rate_delta is None else 100 * float(rate_delta),
+            "contribution_pct": None if contribution is None else 100 * float(contribution),
+            "material": material,
+            "verdict": verdict,
+            "reason": reason,
+            "flags": flags,
+            "blocking_city_keys": blocking_keys,
+            "_contribution": contribution,
+        }
+
+    other_pct: float | None = None
+    if (
+        same_cohort
+        and platform_delta is not None
+        and platform_delta < 0
+        and prior_fe is not None
+        and curr_fe is not None
+        and prior_fe > 0
+        and curr_fe > 0
+        and prior_rr is not None
+        and curr_rr is not None
+        and all(results[svc]["verdict"] != "undetermined" for svc in SERVICES)
+    ):
+        prior_other_rr = prior_rr - sum(service_inputs[svc]["prior_rr"] for svc in SERVICES)
+        curr_other_rr = curr_rr - sum(service_inputs[svc]["curr_rr"] for svc in SERVICES)
+        if prior_other_rr >= 0 and curr_other_rr >= 0:
+            other_delta = Fraction(curr_other_rr, curr_fe) - Fraction(prior_other_rr, prior_fe)
+            other_pct = 100 * float(other_delta / platform_delta)
+
+    verdict, reason, material_services, flags, blocking = _service_breakdown_verdict(results)
+    return {
+        "triggered": True,
+        "method": "additive_fe2rr_delta",
+        "verdict": verdict,
+        "reason": reason,
+        "material_services": material_services,
+        "flags": flags,
+        "platform_rate_delta_pp": None if platform_delta is None else 100 * float(platform_delta),
+        "other_services_contribution_pct": other_pct,
+        "services": {svc: _public_service(results[svc]) for svc in SERVICES},
+        "blocking_city_keys": blocking,
+    }
+
+
+def _evaluate_rr2net_services(
+    *,
+    triggered: bool,
+    prior_rr: int | None,
+    curr_rr: int | None,
+    prior_net: int | None,
+    curr_net: int | None,
+    service_inputs: dict[str, dict],
+    same_cohort: bool,
+) -> dict:
+    if not triggered:
+        return {
+            "triggered": False,
+            "method": "current_rr_weighted_rr2net_delta",
+            "verdict": "not_triggered",
+            "reason": "rr2net_not_primary",
+            "material_services": [],
+            "flags": [],
+            "platform_rate_delta_pp": None,
+            "mix_shift_contribution_pct": None,
+            "other_services_contribution_pct": None,
+            "services": {},
+            "blocking_city_keys": [],
+        }
+
+    p_platform = _rate(prior_net, prior_rr)
+    c_platform = _rate(curr_net, curr_rr)
+    platform_delta = None if p_platform is None or c_platform is None else c_platform - p_platform
+
+    results: dict[str, dict] = {}
+    for svc in SERVICES:
+        inp = service_inputs[svc]
+        p_plat_rr, c_plat_rr = inp["prior_platform_rr"], inp["curr_platform_rr"]
+        s_prior_rr, s_curr_rr = inp["prior_rr"], inp["curr_rr"]
+        s_prior_net, s_curr_net = inp["prior_net"], inp["curr_net"]
+        override_reason = inp["override_reason"]
+        blocking_keys = list(inp["blocking_keys"])
+
+        p_share = _rate(s_prior_rr, p_plat_rr)
+        c_share = _rate(s_curr_rr, c_plat_rr)
+        p_rate = _rate(s_prior_net, s_prior_rr)
+        c_rate = _rate(s_curr_net, s_curr_rr)
+        rate_delta = None if p_rate is None or c_rate is None else c_rate - p_rate
+        weighted_delta: Fraction | None = None
+        contribution: Fraction | None = None
+        flags: list[str] = []
+
+        if override_reason is not None:
+            verdict, reason, material = "undetermined", override_reason, None
+        elif p_plat_rr is None:
+            verdict, reason, material = "undetermined", "missing_prior_rr", None
+        elif c_plat_rr is None:
+            verdict, reason, material = "undetermined", "missing_current_rr", None
+        elif s_prior_rr is None:
+            verdict, reason, material = "undetermined", f"missing_prior_{svc}_rr", None
+        elif s_curr_rr is None:
+            verdict, reason, material = "undetermined", f"missing_current_{svc}_rr", None
+        elif s_prior_net is None:
+            verdict, reason, material = "undetermined", f"missing_prior_{svc}_net", None
+        elif s_curr_net is None:
+            verdict, reason, material = "undetermined", f"missing_current_{svc}_net", None
+        elif p_plat_rr <= 0:
+            verdict, reason, material = "undetermined", "nonpositive_prior_rr", None
+        elif c_plat_rr <= 0:
+            verdict, reason, material = "undetermined", "nonpositive_current_rr", None
+        elif s_prior_rr < 0:
+            verdict, reason, material = "undetermined", f"negative_prior_{svc}_rr", None
+        elif s_curr_rr < 0:
+            verdict, reason, material = "undetermined", f"negative_current_{svc}_rr", None
+        elif s_prior_net < 0:
+            verdict, reason, material = "undetermined", f"negative_prior_{svc}_net", None
+        elif s_curr_net < 0:
+            verdict, reason, material = "undetermined", f"negative_current_{svc}_net", None
+        elif s_prior_rr == 0 and s_curr_rr == 0:
+            verdict, reason, material = "not_applicable", "no_service_volume", False
+        elif s_prior_rr == 0:
+            verdict, reason, material = "not_applicable", "service_absent_in_prior_month", False
+        elif s_curr_rr == 0:
+            verdict, reason, material = "not_applicable", "service_absent_in_current_month", False
+        elif platform_delta is None or platform_delta >= 0:
+            verdict, reason, material = "not_applicable", "no_rr2net_dip", False
+        elif rate_delta is None or c_share is None:
+            verdict, reason, material = "undetermined", "contribution_unavailable", None
+        else:
+            weighted_delta = c_share * rate_delta
+            contribution = weighted_delta / platform_delta
+            verdict, reason, material, flags = _classify_service_contribution(contribution)
+
+        results[svc] = {
+            "service": svc,
+            "prior_rr_raw": s_prior_rr,
+            "current_rr_raw": s_curr_rr,
+            "prior_net_raw": s_prior_net,
+            "current_net_raw": s_curr_net,
+            "prior_rr_share": None if p_share is None else float(p_share),
+            "current_rr_share": None if c_share is None else float(c_share),
+            "prior_value": None if p_rate is None else float(p_rate),
+            "current_value": None if c_rate is None else float(c_rate),
+            "rate_delta_pp": None if rate_delta is None else 100 * float(rate_delta),
+            "weighted_rate_delta_pp": None if weighted_delta is None else 100 * float(weighted_delta),
+            "contribution_pct": None if contribution is None else 100 * float(contribution),
+            "material": material,
+            "verdict": verdict,
+            "reason": reason,
+            "flags": flags,
+            "blocking_city_keys": blocking_keys,
+            "_contribution": contribution,
+            "_weighted_delta": weighted_delta,
+        }
+
+    mix_pct: float | None = None
+    other_pct: float | None = None
+    if (
+        same_cohort
+        and platform_delta is not None
+        and platform_delta < 0
+        and prior_rr is not None
+        and curr_rr is not None
+        and prior_rr > 0
+        and curr_rr > 0
+        and prior_net is not None
+        and curr_net is not None
+        and all(results[svc]["verdict"] != "undetermined" for svc in SERVICES)
+    ):
+        prior_other_rr = prior_rr - sum(service_inputs[svc]["prior_rr"] for svc in SERVICES)
+        curr_other_rr = curr_rr - sum(service_inputs[svc]["curr_rr"] for svc in SERVICES)
+        prior_other_net = prior_net - sum(service_inputs[svc]["prior_net"] for svc in SERVICES)
+        curr_other_net = curr_net - sum(service_inputs[svc]["curr_net"] for svc in SERVICES)
+        if (
+            prior_other_rr >= 0
+            and curr_other_rr >= 0
+            and prior_other_net >= 0
+            and curr_other_net >= 0
+        ):
+            sum_commute_rate = sum(
+                (results[svc]["_weighted_delta"] for svc in SERVICES if results[svc]["_weighted_delta"] is not None),
+                Fraction(0),
+            )
+            if prior_other_rr == 0 and curr_other_rr == 0 and prior_other_net == 0 and curr_other_net == 0:
+                other_term = Fraction(0)
+            elif prior_other_rr > 0 and curr_other_rr > 0:
+                other_term = Fraction(curr_other_rr, curr_rr) * (
+                    Fraction(curr_other_net, curr_other_rr) - Fraction(prior_other_net, prior_other_rr)
+                )
+            else:
+                other_term = Fraction(curr_other_net, curr_rr) - Fraction(prior_other_net, prior_rr)
+            mix_term = platform_delta - sum_commute_rate - other_term
+            other_pct = 100 * float(other_term / platform_delta)
+            mix_pct = 100 * float(mix_term / platform_delta)
+
+    verdict, reason, material_services, flags, blocking = _service_breakdown_verdict(results)
+    return {
+        "triggered": True,
+        "method": "current_rr_weighted_rr2net_delta",
+        "verdict": verdict,
+        "reason": reason,
+        "material_services": material_services,
+        "flags": flags,
+        "platform_rate_delta_pp": None if platform_delta is None else 100 * float(platform_delta),
+        "mix_shift_contribution_pct": mix_pct,
+        "other_services_contribution_pct": other_pct,
+        "services": {svc: _public_service(results[svc]) for svc in SERVICES},
+        "blocking_city_keys": blocking,
+    }
+
+
 def _summarize_block(
     *,
     scope: dict,
@@ -498,6 +859,7 @@ def _summarize_block(
     prior_scale: Fraction,
     curr_scale: Fraction,
     reg_inputs: tuple[int | None, int | None, str | None, list[str], dict | None],
+    service_inputs: dict,
     coverage: dict | None = None,
     members: list[dict] | None = None,
     omitted_member_count: int = 0,
@@ -559,12 +921,52 @@ def _summarize_block(
         override_reason=reg_override,
         blocking_keys=reg_blocking,
     )
+
+    fe2rr_svc_triggered = "fe2rr" in primary_stages
+    fe2rr_svc_cfg = service_inputs["fe2rr"]
+    fe2rr_services = _evaluate_fe2rr_services(
+        triggered=fe2rr_svc_triggered,
+        prior_fe=fe2rr_svc_cfg["prior_fe"],
+        curr_fe=fe2rr_svc_cfg["curr_fe"],
+        prior_rr=fe2rr_svc_cfg["prior_rr"],
+        curr_rr=fe2rr_svc_cfg["curr_rr"],
+        service_inputs=fe2rr_svc_cfg["services"],
+        same_cohort=fe2rr_svc_cfg["same_cohort"],
+    )
+
+    rr2net_svc_triggered = "rr2net" in primary_stages
+    rr2net_svc_cfg = service_inputs["rr2net"]
+    rr2net_services = _evaluate_rr2net_services(
+        triggered=rr2net_svc_triggered,
+        prior_rr=rr2net_svc_cfg["prior_rr"],
+        curr_rr=rr2net_svc_cfg["curr_rr"],
+        prior_net=rr2net_svc_cfg["prior_net"],
+        curr_net=rr2net_svc_cfg["curr_net"],
+        service_inputs=rr2net_svc_cfg["services"],
+        same_cohort=rr2net_svc_cfg["same_cohort"],
+    )
+
     public_coverage = None if coverage is None else dict(coverage)
-    if reg_triggered and public_coverage is not None:
-        if reg_cov is not None:
-            public_coverage["registrations"] = reg_cov
-        elif "stage_blocked_city_counts" in public_coverage:
-            public_coverage["registrations_blocked_city_count"] = len(reg_blocking)
+    if public_coverage is not None:
+        if reg_triggered:
+            if reg_cov is not None:
+                public_coverage["registrations"] = reg_cov
+            elif "stage_blocked_city_counts" in public_coverage:
+                public_coverage["registrations_blocked_city_count"] = len(reg_blocking)
+        if fe2rr_svc_triggered:
+            if fe2rr_svc_cfg["coverage"] is not None:
+                public_coverage["fe2rr_services"] = fe2rr_svc_cfg["coverage"]
+            elif "stage_blocked_city_counts" in public_coverage:
+                public_coverage["fe2rr_service_blocked_city_counts"] = {
+                    svc: len(fe2rr_svc_cfg["services"][svc]["blocking_keys"]) for svc in SERVICES
+                }
+        if rr2net_svc_triggered:
+            if rr2net_svc_cfg["coverage"] is not None:
+                public_coverage["rr2net_services"] = rr2net_svc_cfg["coverage"]
+            elif "stage_blocked_city_counts" in public_coverage:
+                public_coverage["rr2net_service_blocked_city_counts"] = {
+                    svc: len(rr2net_svc_cfg["services"][svc]["blocking_keys"]) for svc in SERVICES
+                }
 
     return {
         **scope,
@@ -579,6 +981,10 @@ def _summarize_block(
         "flags": flags,
         "stages": public_stages,
         "registration_check": registration_check,
+        "service_breakdown": {
+            "fe2rr": fe2rr_services,
+            "rr2net": rr2net_services,
+        },
         "coverage": public_coverage,
         "members": members,
         "omitted_member_count": omitted_member_count,
@@ -683,6 +1089,48 @@ def _city_block(context: dict, key: str, name: str, selected_stages: tuple[str, 
         [],
         None,
     )
+    service_inputs = {
+        "fe2rr": {
+            "prior_fe": counts["prior_fe2rr_fe"],
+            "curr_fe": counts["curr_fe2rr_fe"],
+            "prior_rr": counts["prior_fe2rr_rr"],
+            "curr_rr": counts["curr_fe2rr_rr"],
+            "same_cohort": True,
+            "coverage": None,
+            "services": {
+                svc: {
+                    "prior_fe": counts["prior_fe2rr_fe"],
+                    "curr_fe": counts["curr_fe2rr_fe"],
+                    "prior_rr": None if prior_fact is None else prior_fact[SERVICE_FIELDS[svc][0]],
+                    "curr_rr": None if curr_fact is None else curr_fact[SERVICE_FIELDS[svc][0]],
+                    "override_reason": None,
+                    "blocking_keys": [],
+                }
+                for svc in SERVICES
+            },
+        },
+        "rr2net": {
+            "prior_rr": counts["prior_rr2net_rr"],
+            "curr_rr": counts["curr_rr2net_rr"],
+            "prior_net": counts["prior_rr2net_net"],
+            "curr_net": counts["curr_rr2net_net"],
+            "same_cohort": True,
+            "coverage": None,
+            "services": {
+                svc: {
+                    "prior_platform_rr": counts["prior_rr2net_rr"],
+                    "curr_platform_rr": counts["curr_rr2net_rr"],
+                    "prior_rr": None if prior_fact is None else prior_fact[SERVICE_FIELDS[svc][0]],
+                    "curr_rr": None if curr_fact is None else curr_fact[SERVICE_FIELDS[svc][0]],
+                    "prior_net": None if prior_fact is None else prior_fact[SERVICE_FIELDS[svc][1]],
+                    "curr_net": None if curr_fact is None else curr_fact[SERVICE_FIELDS[svc][1]],
+                    "override_reason": None,
+                    "blocking_keys": [],
+                }
+                for svc in SERVICES
+            },
+        },
+    }
     return _summarize_block(
         scope=_scope("city", label, context["month"], context["prior_month"], [key]),
         calendar_meta=context["calendar_adjustment"],
@@ -695,6 +1143,7 @@ def _city_block(context: dict, key: str, name: str, selected_stages: tuple[str, 
         prior_scale=context["prior_scale"],
         curr_scale=context["current_scale"],
         reg_inputs=reg_inputs,
+        service_inputs=service_inputs,
     )
 
 
@@ -708,6 +1157,8 @@ def _compact_member(block: dict) -> dict:
         "material_stages": block["material_stages"],
         "primary_stages": block["primary_stages"],
         "registration_check_verdict": block["registration_check"]["verdict"],
+        "fe2rr_service_drivers": block["service_breakdown"]["fe2rr"]["material_services"],
+        "rr2net_service_drivers": block["service_breakdown"]["rr2net"]["material_services"],
         "reason": block["reason"],
     }
 
@@ -813,6 +1264,50 @@ def _strict_aggregate_block(
         reg_block,
         None,
     )
+    fe2rr_svc_map: dict[str, dict] = {}
+    rr2net_svc_map: dict[str, dict] = {}
+    for svc in SERVICES:
+        rr_col, net_col = SERVICE_FIELDS[svc]
+        p_s_fe2rr, c_s_fe2rr, s_fe2rr_block = _strict_sum(keys, prior_facts, curr_facts, ("fe_sessions", rr_col))
+        fe2rr_svc_map[svc] = {
+            "prior_fe": p_s_fe2rr["fe_sessions"],
+            "curr_fe": c_s_fe2rr["fe_sessions"],
+            "prior_rr": p_s_fe2rr[rr_col],
+            "curr_rr": c_s_fe2rr[rr_col],
+            "override_reason": "incomplete_group_member" if s_fe2rr_block else None,
+            "blocking_keys": s_fe2rr_block,
+        }
+        p_s_rr2net, c_s_rr2net, s_rr2net_block = _strict_sum(keys, prior_facts, curr_facts, ("rr", rr_col, net_col))
+        rr2net_svc_map[svc] = {
+            "prior_platform_rr": p_s_rr2net["rr"],
+            "curr_platform_rr": c_s_rr2net["rr"],
+            "prior_rr": p_s_rr2net[rr_col],
+            "curr_rr": c_s_rr2net[rr_col],
+            "prior_net": p_s_rr2net[net_col],
+            "curr_net": c_s_rr2net[net_col],
+            "override_reason": "incomplete_group_member" if s_rr2net_block else None,
+            "blocking_keys": s_rr2net_block,
+        }
+    service_inputs = {
+        "fe2rr": {
+            "prior_fe": counts["prior_fe2rr_fe"],
+            "curr_fe": counts["curr_fe2rr_fe"],
+            "prior_rr": counts["prior_fe2rr_rr"],
+            "curr_rr": counts["curr_fe2rr_rr"],
+            "same_cohort": not fe2rr_block and all(not fe2rr_svc_map[svc]["blocking_keys"] for svc in SERVICES),
+            "coverage": None,
+            "services": fe2rr_svc_map,
+        },
+        "rr2net": {
+            "prior_rr": counts["prior_rr2net_rr"],
+            "curr_rr": counts["curr_rr2net_rr"],
+            "prior_net": counts["prior_rr2net_net"],
+            "curr_net": counts["curr_rr2net_net"],
+            "same_cohort": not rr2net_block and all(not rr2net_svc_map[svc]["blocking_keys"] for svc in SERVICES),
+            "coverage": None,
+            "services": rr2net_svc_map,
+        },
+    }
     return _summarize_block(
         scope=_scope(kind, label, context["month"], context["prior_month"], keys),
         calendar_meta=context["calendar_adjustment"],
@@ -825,6 +1320,7 @@ def _strict_aggregate_block(
         prior_scale=context["prior_scale"],
         curr_scale=context["current_scale"],
         reg_inputs=reg_inputs,
+        service_inputs=service_inputs,
         coverage=coverage,
         members=[_compact_member(item) for item in member_blocks[:MEMBER_PAGE_SIZE]],
         omitted_member_count=max(0, len(member_blocks) - MEMBER_PAGE_SIZE),
@@ -919,6 +1415,66 @@ def _national_block(context: dict, selected_stages: tuple[str, ...]) -> dict:
         [],
         reg_cov,
     )
+    fe2rr_svc_map: dict[str, dict] = {}
+    fe2rr_svc_cov: dict[str, dict] = {}
+    rr2net_svc_map: dict[str, dict] = {}
+    rr2net_svc_cov: dict[str, dict] = {}
+    for svc in SERVICES:
+        rr_col, net_col = SERVICE_FIELDS[svc]
+        p_s_fe2rr, c_s_fe2rr, s_fe2rr_cov = _matched_sum(prior_facts, curr_facts, ("fe_sessions", rr_col))
+        fe2rr_svc_cov[svc] = s_fe2rr_cov
+        fe2rr_svc_map[svc] = {
+            "prior_fe": p_s_fe2rr["fe_sessions"],
+            "curr_fe": c_s_fe2rr["fe_sessions"],
+            "prior_rr": p_s_fe2rr[rr_col],
+            "curr_rr": c_s_fe2rr[rr_col],
+            "override_reason": "no_matched_service_cities" if s_fe2rr_cov["matched_city_count"] == 0 else None,
+            "blocking_keys": [],
+        }
+        p_s_rr2net, c_s_rr2net, s_rr2net_cov = _matched_sum(prior_facts, curr_facts, ("rr", rr_col, net_col))
+        rr2net_svc_cov[svc] = s_rr2net_cov
+        rr2net_svc_map[svc] = {
+            "prior_platform_rr": p_s_rr2net["rr"],
+            "curr_platform_rr": c_s_rr2net["rr"],
+            "prior_rr": p_s_rr2net[rr_col],
+            "curr_rr": c_s_rr2net[rr_col],
+            "prior_net": p_s_rr2net[net_col],
+            "curr_net": c_s_rr2net[net_col],
+            "override_reason": "no_matched_service_cities" if s_rr2net_cov["matched_city_count"] == 0 else None,
+            "blocking_keys": [],
+        }
+    _, _, fe2rr_all_cov = _matched_sum(
+        prior_facts, curr_facts, ("fe_sessions", "rr", "bike_rr", "auto_rr", "cab_rr"),
+    )
+    _, _, rr2net_all_cov = _matched_sum(
+        prior_facts, curr_facts, ("rr", "net", "bike_rr", "bike_net", "auto_rr", "auto_net", "cab_rr", "cab_net"),
+    )
+    service_inputs = {
+        "fe2rr": {
+            "prior_fe": counts["prior_fe2rr_fe"],
+            "curr_fe": counts["curr_fe2rr_fe"],
+            "prior_rr": counts["prior_fe2rr_rr"],
+            "curr_rr": counts["curr_fe2rr_rr"],
+            "same_cohort": (
+                fe2rr_cov["matched_city_count"] > 0
+                and fe2rr_all_cov["matched_city_count"] == fe2rr_cov["matched_city_count"]
+            ),
+            "coverage": fe2rr_svc_cov,
+            "services": fe2rr_svc_map,
+        },
+        "rr2net": {
+            "prior_rr": counts["prior_rr2net_rr"],
+            "curr_rr": counts["curr_rr2net_rr"],
+            "prior_net": counts["prior_rr2net_net"],
+            "curr_net": counts["curr_rr2net_net"],
+            "same_cohort": (
+                rr2net_cov["matched_city_count"] > 0
+                and rr2net_all_cov["matched_city_count"] == rr2net_cov["matched_city_count"]
+            ),
+            "coverage": rr2net_svc_cov,
+            "services": rr2net_svc_map,
+        },
+    }
     return _summarize_block(
         scope=_scope("national", "National (matched cities)", context["month"], context["prior_month"], []),
         calendar_meta=context["calendar_adjustment"],
@@ -931,6 +1487,7 @@ def _national_block(context: dict, selected_stages: tuple[str, ...]) -> dict:
         prior_scale=context["prior_scale"],
         curr_scale=context["current_scale"],
         reg_inputs=reg_inputs,
+        service_inputs=service_inputs,
         coverage=coverage,
     )
 
@@ -1002,7 +1559,11 @@ def investigate_funnel(
     additions = [FUNNEL_PROXY_WARNING]
     if any(block["calendar_adjustment"]["adjusted"] for block in blocks):
         additions.append(FUNNEL_CALENDAR_SCALING_WARNING)
-    if any("over_explained" in block["flags"] for block in blocks):
+    if any(
+        "over_explained" in block["flags"]
+        or any("over_explained" in sb["flags"] for sb in block["service_breakdown"].values())
+        for block in blocks
+    ):
         additions.append(FUNNEL_OVER_EXPLAINED_WARNING)
     if national:
         additions.append(FUNNEL_NATIONAL_MATCHED_WARNING)
@@ -1010,6 +1571,11 @@ def investigate_funnel(
         block["verdict"] in ("undetermined", "partial_contributors_identified", "partial_no_material_contributor")
         or any(stage["verdict"] == "undetermined" for stage in block["stages"].values())
         or block["registration_check"]["verdict"] == "undetermined"
+        or any(
+            sb["verdict"] in ("undetermined", "partial_services_identified", "partial_no_material_service")
+            or any(svc["verdict"] == "undetermined" for svc in sb["services"].values())
+            for sb in block["service_breakdown"].values()
+        )
         for block in blocks
     ):
         additions.append(FUNNEL_UNDETERMINED_WARNING)
