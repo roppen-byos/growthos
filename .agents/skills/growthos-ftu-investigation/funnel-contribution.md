@@ -47,7 +47,7 @@ Render the historical funnel panel with these exact six columns:
 
 `City | Cal.-Adj. MoM FTU Dip | Primary Issues (>20%, cum. >70%) | FE Share of Dip | FE2RR Share of Dip | RR2Net Share of Dip`
 
-Add one concise note beside the table: `+` means the stage worsened and contributed to the FTU dip (**bold** = selected primary issue from `> 20%` stages until cumulative `> 70%`); `−` means the stage stayed flat or improved (helped offset the dip). Counterfactual percentages omit interaction terms and need not sum to 100%.
+Add one concise line directly above the table: `+` means the metric contributed to FTU improvement, cushioning the FTU fall; `−` means the metric pulled FTU down and deepened the fall. Each cell is that stage's **share of the FTU dip** — not the metric's growth rate — so display the reversed sign of the CLI `contribution_pct`: a positive `contribution_pct` (stage declined) renders as `−`, a negative `contribution_pct` (stage improved) renders as `+`, and exact zero renders `0.00%`. **Bold** = selected primary issue from `> 20%` stages until cumulative `> 70%`. Counterfactual percentages omit interaction terms, are not additive, and need not sum to 100%.
 
 When `FE` is in `primary_stages`, format `FE` inline in `Primary Issues` using `registration_check`, and add a one-line footnote directly below the table listing each triggered city's exact calendar-adjusted MoM `Registrations %` (or unavailable reason) from the CLI:
 
@@ -61,10 +61,10 @@ Stage verdicts and compact cell formatting:
 
 | Stage verdict / selection | Cell format | Meaning |
 | --- | --- | --- |
-| `material_contributor` (`selected_as_primary: true`) | **`+60.98%`** (add `*(>100% offset)*` if `over_explained`) | `contribution_pct > 20%` and selected into `primary_stages` (top descending until cumulative `> 70%`) |
-| `material_contributor` (`selected_as_primary: false`) | `+27.44% *(>20%, non-primary)*` | `contribution_pct > 20%`, but earlier stages already exceeded `> 70%` cumulative |
-| `below_threshold` | `+5.23%` | Stage deteriorated (`0% < contribution_pct <= 20%`) |
-| `no_stage_deterioration` | `−3.02% *(improved)*` (`0.00% *(flat)*` if zero) | Stage stayed flat or improved (`contribution_pct <= 0%`); negative percentages are counter-effects, not causes |
+| `material_contributor` (`selected_as_primary: true`) | **`−60.98%`** (add `*(>100% of dip)*` if `over_explained`) | `contribution_pct > 20%` and selected into `primary_stages` (top descending until cumulative `> 70%`) |
+| `material_contributor` (`selected_as_primary: false`) | `−27.44% *(also material)*` | `contribution_pct > 20%`, but earlier stages already exceeded `> 70%` cumulative |
+| `below_threshold` | `−5.23%` | Stage deteriorated (`0% < contribution_pct <= 20%`) |
+| `no_stage_deterioration` | `+3.02%` (`0.00%` if zero) | Stage stayed flat or improved (`contribution_pct <= 0%`); the stage contributed to FTU improvement, cushioning part of the fall |
 | `not_applicable` | `—` | Scaled Platform FTU did not dip strictly `> 5%` (`no_historical_ftu_dip` or `no_material_ftu_dip`); factual rates stay visible in prose/details if relevant |
 | `undetermined` | `N/A *(reason)*` | Missing or nonpositive required operand (`missing_*`, `nonpositive_*`, `incomplete_group_member`, `no_prior_month`, etc.) |
 

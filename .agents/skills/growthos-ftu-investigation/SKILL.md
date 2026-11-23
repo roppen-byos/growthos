@@ -70,18 +70,18 @@ Before composing the response, read [output-format.md](../growthos-irf-analysis/
 
 1. **Bottom line:** state the selected month, scope (`top` or `all` shortlist page), total shortlisted cities investigated, and the funnel-down count across outcomes: how many stopped at **Registration Target Shortfall Check**, how many stopped at **Month-on-Month Dip and Persistence Check (`persistent` since `<prior_month>`, non-dipping, or prior-month undetermined)**, and how many reached **Funnel Decomposition (`new_miss` funnel drivers)** — plus the dominant patterns across groups.
 2. **Outcome-grouped, lens-separated tables:**
-   - **Registration Target Shortfall Check (Target lens, all shortlisted cities):** `City | FTU Target | FTU Actual | FTU Variance % | Reg Variance % | Reg Contribution % | Outcome` (stating the configured Registration-contribution stop rule once; mark a stopped city as **Registration issue — stop**).
-   - **Month-on-Month Dip and Persistence Check (cities continuing past Step 1):** `City | Cal.-Adj. MoM FTU % | Prior Month Variance % | Status | Action` — clearly separating:
-     - **`persistent`** (*"Failing since `<prior_month>` — investigate `<prior_month>`"*, stopped),
-     - **`new_miss`** (proceeds to Funnel Decomposition), and
-     - **No material MoM dip / prior undetermined** (stopped; disclosed with exact reason).
-   - **Funnel Decomposition (Historical funnel lens, `new_miss` cities only):** `City | Cal.-Adj. MoM FTU Dip | Primary Issues | FE Share of Dip | FE2RR Share of Dip | RR2Net Share of Dip` (stating the material stage floor, descending primary cutoff, and sign convention once: `+` = stage worsened and contributed to the FTU dip; `−` = stage stayed flat or improved and helped offset the dip).
+   - **Registration Target Shortfall Check (Target lens, `registration_issue` cities only):** `City | FTU Target | FTU Actual | FTU Variance % | Reg Variance % | Reg Contribution % | Outcome` (stating the configured Registration-contribution rule once). Include only cities whose verdict is `registration_issue` and show the Outcome as **Registration issue**. Omit cities that continue (`below_threshold`, `no_registration_shortfall`, or `undetermined`) from this table; they appear in the Month-on-Month Dip and Persistence Check table below. If no city stopped here, state that explicitly instead of showing the table.
+   - **Month-on-Month Dip and Persistence Check (cities not proceeding to Funnel Decomposition):** `City | Cal.-Adj. MoM FTU % | Prior Month Variance % | Status | Action` — include only cities that stop here:
+     - **`persistent`** (*"Failing since `<prior_month>`"*) — do not append "stop" or "stopped" to this cell,
+     - **No material MoM dip / prior undetermined** (disclosed with exact reason).
+     - Omit `new_miss` cities from this table entirely; they appear only in the Funnel Decomposition table below.
+   - **Funnel Decomposition (Historical funnel lens, `new_miss` cities only):** `City | Cal.-Adj. MoM FTU Dip | Primary Issues | FE Share of Dip | FE2RR Share of Dip | RR2Net Share of Dip` (stating the material stage floor, descending primary cutoff, and sign legend directly above the table once: `+` means the metric contributed to FTU improvement, cushioning the fall; `−` means the metric pulled FTU down and deepened the fall; percentages are shares of the dip, not metric growth rates).
      - Format `FE` inside `Primary Issues` using `registration_check` (triggered only when `fe` is in `primary_stages`): **`FE (reg. issue)`** when `verdict == "registration_dip"` (`> 5%` calendar-adjusted MoM Registrations dip), plain **`FE`** when `below_threshold` or `no_registration_dip`, and **`FE (reg. N/A)`** when `undetermined`. Whenever at least one city triggers `registration_check`, add a concise one-line note directly below the Step 3 table listing each triggered city's exact calendar-adjusted MoM `Registrations %` (or unavailable reason) from the CLI.
      - Format each stage cell per [funnel-contribution.md](funnel-contribution.md#table-formatting):
-       - Primary issue (`selected_as_primary: true`, `> 20%` and in top-70% set): **`+60.98%`** (append `*(>100% offset)*` if `over_explained`).
-       - Secondary material (`material: true`, `selected_as_primary: false`, `> 20%` after `> 70%` already reached): `+27.44% *(>20%, non-primary)*`.
-       - `below_threshold` (`0%..20%`): `+5.23%`.
-       - `no_stage_deterioration` (`<= 0%`): `-3.02% *(improved)*` (or `0.00% *(flat)*` when exact zero).
+       - Primary issue (`selected_as_primary: true`, `> 20%` and in top-70% set): **`−60.98%`** (append `*(>100% of dip)*` if `over_explained`).
+       - Secondary material (`material: true`, `selected_as_primary: false`, `> 20%` after `> 70%` already reached): `−27.44% *(also material)*`.
+       - `below_threshold` (`0%..20%`): `−5.23%`.
+       - `no_stage_deterioration` (`<= 0%`): `+3.02%` (or `0.00%` when exact zero). Display the reversed sign of `contribution_pct` so decliners show `−` and improvers show `+`.
        - `undetermined`: `N/A *(reason)*`.
    - Use readable business labels and avoid leaking internal `DEC-*` IDs or DB table names in routine answers.
 3. **Consolidated data & method note (once per answer):**
