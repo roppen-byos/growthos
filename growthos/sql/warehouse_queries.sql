@@ -64,7 +64,10 @@ ORDER BY canonical_city_key
 
 -- name: funnel-monthly
 -- metrics: fe_sessions, rr, net, bike_rr, bike_net, auto_rr, auto_net, cab_rr, cab_net
-WITH rf AS (
+WITH date_bounds AS (
+    SELECT CAST(? AS varchar) AS start_day,
+           CAST(? AS varchar) AS end_day
+), rf AS (
     SELECT date_trunc('day', date(day)) AS time_value,
            customerid,
            city,
@@ -78,8 +81,17 @@ WITH rf AS (
            CAST(sum(CASE WHEN service_name IN ('CabEconomy', 'CabPremium', 'Cab Premium - Intercity', 'Cab AC - Airport', 'Cab AC Sedan - Airport', 'Cab SUV', 'Cab Premium - Airport', 'Cab AC Sedan', 'Cab Daily', 'Cab Economy - Intercity', 'CabAC', 'Cab Priority', 'Cab SUV - Airport', 'Cab SUV - Intercity', 'Cab Economy - Airport', 'Cab Premium Biz') THEN rr_sessions_unique_daily END) AS double) AS cab_rr,
            CAST(sum(CASE WHEN service_name IN ('CabEconomy', 'CabPremium', 'Cab Premium - Intercity', 'Cab AC - Airport', 'Cab AC Sedan - Airport', 'Cab SUV', 'Cab Premium - Airport', 'Cab AC Sedan', 'Cab Daily', 'Cab Economy - Intercity', 'CabAC', 'Cab Priority', 'Cab SUV - Airport', 'Cab SUV - Intercity', 'Cab Economy - Airport', 'Cab Premium Biz') THEN net_rides_daily END) AS double) AS cab_net
     FROM hive.datasets.customer_rf_daily_kpi_old_ct
-    WHERE day >= ? AND day < ?
+    CROSS JOIN date_bounds
+    WHERE day >= start_day
+      AND day < end_day
     GROUP BY 1,2,3
+), ltr_data AS (
+    SELECT min(date_trunc('day', date(platform_level_first_order_date))) AS time_value,
+           customer_id
+    FROM customer_internal.customer_first_ride_lookup_immutable
+    CROSS JOIN date_bounds
+    WHERE day = date_add('day', -1, date(end_day))
+    GROUP BY customer_id
 ), city_month AS (
     SELECT CASE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') WHEN 'guntur' THEN 'vijayawada' WHEN 'faridabad' THEN 'delhi' WHEN 'attingal' THEN 'trivandrum' ELSE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') END AS canonical_city_key,
            coalesce(nullif(trim(city), ''), 'city_not_found') AS source_city,
@@ -93,6 +105,12 @@ WITH rf AS (
            CAST(coalesce(sum(cab_rr), 0) AS bigint) AS cab_rr,
            CAST(coalesce(sum(cab_net), 0) AS bigint) AS cab_net
     FROM rf
+    LEFT JOIN ltr_data
+        ON rf.customerid = ltr_data.customer_id
+    WHERE (
+        rf.time_value <= ltr_data.time_value
+        OR ltr_data.time_value IS NULL
+    )
     GROUP BY 1,2
 )
 SELECT canonical_city_key,

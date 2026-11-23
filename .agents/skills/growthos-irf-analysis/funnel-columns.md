@@ -2,7 +2,7 @@
 
 Repeat `funnel --column NAME` to select flat output columns; otherwise, the command returns the full nested result. Use `.venv/bin/python -m growthos funnel --help` for allowed names.
 
-> Scope note: `funnel` projects all public IRF and all-customer funnel metrics (`installs`, `registrations`, `platform_*_ftu`, `fe_sessions`, `rr`, `net`, service `*_rr`/`*_net`, `i2r`, `r2n`, service shares, `fe2rr`, `rr2net`, and service `*_rr2net`). For calendar-adjusted MoM FTU-dip attribution across `FE`, `FE2RR`, and `RR2Net`, use `investigate-funnel` via [the FTU investigation skill](../growthos-ftu-investigation/SKILL.md).
+> Scope note: `funnel` projects all public IRF and FTU-eligible funnel metrics (`installs`, `registrations`, `platform_*_ftu`, `fe_sessions`, `rr`, `net`, service `*_rr`/`*_net`, `i2r`, `r2n`, service shares, `fe2rr`, `rr2net`, and service `*_rr2net`). For calendar-adjusted MoM FTU-dip attribution across `FE`, `FE2RR`, and `RR2Net`, use `investigate-funnel` via [the FTU investigation skill](../growthos-ftu-investigation/SKILL.md).
 
 - `city`, `city_key`, `tier`; an unsuffixed metric (or `METRIC_latest` alias) is its latest value.
 - Volumes: `METRIC_previous`, `METRIC_mom_abs` (alias `METRIC_delta`), `METRIC_mom_pct` (alias `METRIC_growth`).

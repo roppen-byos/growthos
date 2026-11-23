@@ -1,6 +1,6 @@
 # Registration Contribution Rules (`investigate`)
 
-Use this reference whenever interpreting `.venv/bin/python -m growthos investigate` output — either independently alongside `investigate-funnel` on the widening-miss (`persistent` / `new_miss`) cities in the Layer 2 FTU investigation flow, or for direct same-month Registration target questions. For calendar-adjusted MoM funnel contribution (`investigate-funnel`), see [funnel-contribution.md](funnel-contribution.md).
+Use this reference whenever interpreting `.venv/bin/python -m growthos investigate` output — either as **Step 1 — Registration Target Shortfall Check** of the sequential Investigation Layer FTU investigation flow on shortlisted FTU target-miss cities, or for direct same-month Registration target questions. For calendar-adjusted MoM funnel contribution (`investigate-funnel`), see [funnel-contribution.md](funnel-contribution.md).
 
 ## Command examples
 
@@ -14,27 +14,28 @@ Use this reference whenever interpreting `.venv/bin/python -m growthos investiga
 
 ## Method and exact boundaries
 
-- **Lens:** evaluates whether a scope with a **same-month Platform FTU target miss** (`ftu_gap < 0`) also materially missed its same-month **Registration target**, while reporting exact FTU-target-accounting context (`expected_ftu`, `registration_effect`, `unexplained_gap`, `contribution_pct`). This is target-attainment and accounting evidence — not causal proof and not a month-on-month comparison.
-- **Arithmetic per scope (exact integer verdict and exact rational context; floats are display only):**
+- **Lens:** evaluates how much of a **same-month Platform FTU target miss** (`ftu_gap < 0`) is accounted for by a same-month **Registration target shortfall**, using exact target-accounting arithmetic (`expected_ftu`, `registration_effect`, `unexplained_gap`, `contribution_pct`). This is target-accounting evidence — not causal proof and not a month-on-month comparison.
+- **Arithmetic per scope (exact rational arithmetic; floats are display only):**
   - `ftu_gap = platform_ftu_actual - platform_ftu_target` (negative on a miss)
   - `reg_gap = registrations_actual - registrations_target` (negative on a miss); `reg_gap_pct = 100 * reg_gap / registrations_target`
   - `target_ratio = platform_ftu_target / registrations_target`
   - `expected_ftu = registrations_actual * target_ratio`
   - `registration_effect = expected_ftu - platform_ftu_target` (negative when registrations miss target)
   - `unexplained_gap = ftu_gap - registration_effect`
-  - `contribution = registration_effect / ftu_gap` (accounting context when `ftu_gap < 0`)
-- **Strict `< -5%` Registration target-miss rule:** when `ftu_gap < 0`, a scope flags `registration_issue` iff `reg_gap / registrations_target < -5%` (exact integer test `20 * reg_gap < -registrations_target`, mirroring the Platform FTU `> 5%` miss rule). Exact `-5.00%` and smaller misses return `no_material_registration_miss`; meeting or exceeding the Registration target returns `no_registration_shortfall`. Display rounding never changes a verdict.
+  - `contribution = registration_effect / ftu_gap` (when `ftu_gap < 0`)
+- **Strict `> 70%` Registration contribution rule:** when `ftu_gap < 0`, a scope flags `registration_issue` iff `contribution > 70%` (exact rational test `contribution > Fraction(7, 10)`). Exact `70.00%` and lower positive contributions return `below_threshold` (`contribution_at_or_below_70_percent`); meeting or exceeding the Registration target (`reg_gap >= 0`) returns `no_registration_shortfall`. Display rounding never changes a verdict.
+- **Investigation Layer routing:** in the sequential FTU investigation flow, `registration_issue` (`> 70%`) **stops** further investigation for that city; `below_threshold`, `no_registration_shortfall`, and `undetermined` (disclosed as `N/A`) continue to Step 2 — Month-on-Month Dip and Persistence Check.
 - **Nulls and zeros:** null targets and null actuals are never treated as zero; missing or nonpositive targets keep the verdict `undetermined` while leaving valid observed facts visible.
 
 ## Verdicts
 
 | Verdict | Meaning |
 | --- | --- |
-| `registration_issue` | `ftu_gap < 0` and Registrations missed target by strictly more than 5% (`reg_gap / reg_target < -5%`); flag `over_explained` when `contribution_pct > 100%` (positive `unexplained_gap`: actual FTU above expected partly offset the miss) |
-| `no_material_registration_miss` | `ftu_gap < 0` and Registrations missed target by at most 5% (`-5% <= reg_gap_pct < 0%`, including exact `-5.00%`) |
-| `no_registration_shortfall` | `ftu_gap < 0` and `reg_gap >= 0`; Registrations met or exceeded target |
+| `registration_issue` | `ftu_gap < 0` and Registration contribution is strictly above `70%` (`contribution > 70%`); flag `over_explained` when `contribution_pct > 100%` (positive `unexplained_gap`: actual FTU above expected partly offset the miss). **Stops the Investigation Layer for that city.** |
+| `below_threshold` | `ftu_gap < 0`, `reg_gap < 0`, and `0% < contribution_pct <= 70%` (including exact `70.00%`; reason `contribution_at_or_below_70_percent`). Continues to Step 2 (Month-on-Month Dip and Persistence Check). |
+| `no_registration_shortfall` | `ftu_gap < 0` and `reg_gap >= 0`; Registrations met or exceeded target. Continues to Step 2 (Month-on-Month Dip and Persistence Check). |
 | `not_applicable` | `ftu_gap >= 0` (`ftu_target_met`); Platform FTU met or exceeded target (factual counts remain visible) |
-| `undetermined` | Required month, target import, city observation, group member, or positive operand unavailable (`no_stored_month`, `targets_not_imported`, `registration_targets_not_imported`, `incomplete_group_member`, `missing_*`, `nonpositive_*`, `pooled_new_launch_target_has_no_per_city_value`, etc.) |
+| `undetermined` | Required month, target import, city observation, group member, or positive operand unavailable (`no_stored_month`, `targets_not_imported`, `registration_targets_not_imported`, `incomplete_group_member`, `missing_*`, `nonpositive_*`, `pooled_new_launch_target_has_no_per_city_value`, etc.). Disclosed as `N/A` and continues to Step 2 (Month-on-Month Dip and Persistence Check). |
 
 ## Scopes and history
 
@@ -48,7 +49,7 @@ Use this reference whenever interpreting `.venv/bin/python -m growthos investiga
 
 ## Wording and reporting guardrails
 
-- Always show the returned **verdict** beside `reg_gap_pct` and `contribution_pct` in every row and state the strict `< -5%` Registration target-miss rule once per answer.
+- Always show the returned **verdict** beside `reg_gap_pct` and `contribution_pct` in every row and state the strict `> 70%` Registration contribution rule once per answer.
 - Retain contributions above `100%` (`over_explained`) and explain them as **partial offsets** (better-than-target FTU relative to registrations), never as errors.
 - State what the registration shortfall **accounts for** in target accounting; never say registrations *caused* the FTU gap, never label the unexplained remainder a "conversion problem," and use **"target"** rather than **"plan"** in new output.
 - Stop upstream at **Registrations**; do not extend into Installs or Paid/Organic attribution.

@@ -16,7 +16,7 @@ VOLUMES = (
     "installs", "registrations", "platform_ftu", "platform_link_ftu",
     "platform_auto_ftu", "platform_cab_ftu",
 )
-# Additive all-customer funnel volumes stored in irf.facts and exposed in the
+# Additive FTU-eligible funnel volumes stored in irf.facts and exposed in the
 # public metric catalogue alongside VOLUMES (DEC-033).
 FUNNEL_VOLUMES = (
     "fe_sessions", "rr", "net",

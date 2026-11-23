@@ -1,8 +1,10 @@
-"""Granular calendar-adjusted MoM funnel contribution investigation (DEC-032).
+"""Granular calendar-adjusted MoM funnel contribution investigation (DEC-032, DEC-037, DEC-039).
 
 Calculation-only: no database, filesystem or CLI access. Evaluates FE sessions,
-FE2RR and RR2Net independently in parallel against a calendar-adjusted MoM
-Platform FTU dip using exact rational arithmetic; floats are presentation only.
+FE2RR and RR2Net independently against a material (> 5%) calendar-adjusted MoM
+Platform FTU dip via hold-two-constant counterfactual proxies using exact rational
+arithmetic, then selects > 20% stages descending until cumulative contribution
+exceeds > 70%; floats are presentation only.
 """
 
 from __future__ import annotations
@@ -24,6 +26,9 @@ from .evidence import (
 from .selection import FUNNEL_STAGES, validate_funnel_stages
 
 MATERIAL_THRESHOLD = Fraction(1, 5)
+CUMULATIVE_ISSUE_THRESHOLD = Fraction(7, 10)
+FTU_DIP_THRESHOLD = Fraction(-1, 20)
+STAGE_RANK = {"fe": 0, "fe2rr": 1, "rr2net": 2}
 MEMBER_PAGE_SIZE = 25
 
 METHOD = {
@@ -34,30 +39,42 @@ METHOD = {
         "Conversion rates FE2RR and RR2Net are unaffected."
     ),
     "ftu_change": "current_ftu_scaled - prior_ftu_scaled (negative indicates an FTU dip)",
+    "ftu_dip_rule": "ftu_change / prior_ftu_scaled < -5% (strict > 5% calendar-adjusted MoM FTU dip; exact rational test)",
     "stage_formulas": {
         "fe": "prior_ftu_scaled * (current_fe_scaled / prior_fe_scaled - 1) / ftu_change",
         "fe2rr": "prior_ftu_scaled * (current_fe2rr / prior_fe2rr - 1) / ftu_change",
         "rr2net": "prior_ftu_scaled * (current_rr2net / prior_rr2net - 1) / ftu_change",
     },
-    "evaluation": "parallel_independent",
+    "evaluation": "independent_counterfactual_hold_two_constant_on_platform_ftu",
     "material_threshold_pct": 20,
+    "cumulative_issue_threshold_pct": 70,
+    "issue_selection_rule": (
+        "Filter stages strictly > 20%, sort descending by exact contribution, and select stages "
+        "until cumulative contribution is strictly > 70% (if all > 20% stages sum <= 70%, keep "
+        "all > 20% stages and mark primary_coverage_reached_70_pct: false)."
+    ),
     "threshold_comparison": "strictly_greater_than",
     "arithmetic": "exact rational; float fields are presentation only",
     "population_scope": (
-        "All-customer city-wide funnel counts from irf.facts (FE sessions, RR, Net), "
-        "applied as scale-invariant relative-change proxies to scaled Platform FTU."
+        "FTU-eligible city funnel counts from irf.facts (FE sessions, RR, Net for days on or before a customer's "
+        "first completed platform ride plus Zero-Transaction customers), applied as scale-invariant "
+        "hold-two-constant relative-change counterfactuals to scaled Platform FTU."
     ),
     "interpretation": (
-        "Independent proxy decomposition of a calendar-adjusted MoM Platform FTU dip. "
-        "Do not sum stage contributions, do not claim causation, and note that irf.facts "
-        "funnel columns reflect all customers rather than an FTU-eligible-only cohort."
+        "Independent counterfactual decomposition of a material (> 5%) calendar-adjusted MoM Platform FTU dip. "
+        "Counterfactual effects omit cross-stage interaction terms so the three percentages need not sum "
+        "to 100%; do not claim causation, and note that irf.facts funnel columns count FTU-eligible daily "
+        "sessions/rides (including same-day rides on the first-ride day) rather than distinct FTU users."
     ),
 }
 
 THRESHOLDS = {
     "material_contributor_above_pct": 20,
-    "ftu_dip": "ftu_change < 0",
-    "registration_gate": "none_independent_target_lens",
+    "cumulative_issue_above_pct": 70,
+    "ftu_dip_below_pct": -5,
+    "ftu_dip": "ftu_change / prior_ftu_scaled < -5% (strict)",
+    "registration_gate": "registration_target_shortfall_check_above_70_stops_before_funnel",
+    "persistence_gate": "month_on_month_dip_persistence_check_persistent_prior_month_stops_before_funnel",
     "service_drilldown": "deferred_stop_at_platform_rr2net",
 }
 
@@ -167,19 +184,32 @@ def _stage_outcome(
         if relative_change is None or prior_ftu is None or prior_ftu <= 0
         else prior_ftu * relative_change
     )
+    counterfactual_ftu = (
+        None
+        if stage_effect is None or prior_ftu is None
+        else prior_ftu + stage_effect
+    )
+    material_dip = (
+        prior_ftu is not None
+        and prior_ftu > 0
+        and ftu_change is not None
+        and ftu_change / prior_ftu < FTU_DIP_THRESHOLD
+    )
     contribution = (
         None
-        if stage_effect is None or ftu_change is None or ftu_change >= 0
+        if block_reason is not None or stage_reason is not None or stage_effect is None or not material_dip
         else stage_effect / ftu_change
     )
 
     flags: list[str] = []
     if block_reason is not None:
         verdict, reason, material = "undetermined", block_reason, None
-    elif ftu_change is None:
+    elif ftu_change is None or prior_ftu is None or prior_ftu <= 0:
         verdict, reason, material = "undetermined", "ftu_change_unavailable", None
     elif ftu_change >= 0:
         verdict, reason, material = "not_applicable", "no_historical_ftu_dip", False
+    elif not material_dip:
+        verdict, reason, material = "not_applicable", "no_material_ftu_dip", False
     elif stage_reason is not None:
         verdict, reason, material = "undetermined", stage_reason, None
     elif contribution is None:
@@ -202,13 +232,16 @@ def _stage_outcome(
         "current_value": None if current_value is None else float(current_value),
         "relative_change_pct": None if relative_change is None else 100 * float(relative_change),
         "rate_delta_pp": rate_delta_pp,
+        "counterfactual_ftu": None if counterfactual_ftu is None else float(counterfactual_ftu),
         "stage_effect": None if stage_effect is None else float(stage_effect),
         "contribution_pct": None if contribution is None else 100 * float(contribution),
         "material": material,
+        "selected_as_primary": None if verdict == "undetermined" else False,
         "verdict": verdict,
         "reason": reason,
         "flags": flags,
         "blocking_city_keys": list(blocking_keys or []),
+        "_contribution": contribution,
     }
 
 
@@ -373,11 +406,18 @@ def _ftu_summary(
     return summary, p_scaled, ftu_change, reason
 
 
+def _public_stage(item: dict, *, selected_as_primary: bool | None) -> dict:
+    cleaned = {key: value for key, value in item.items() if not key.startswith("_")}
+    cleaned["selected_as_primary"] = selected_as_primary
+    return cleaned
+
+
 def _summarize_block(
     *,
     scope: dict,
     calendar_meta: dict,
     ftu_summary: dict,
+    prior_ftu: Fraction | None,
     ftu_change: Fraction | None,
     block_reason: str | None,
     stage_results: dict[str, dict],
@@ -387,9 +427,20 @@ def _summarize_block(
     omitted_member_count: int = 0,
     blocking_city_keys: list[str] | None = None,
 ) -> dict:
-    material_stages = [
-        name for name in selected_stages if stage_results[name]["verdict"] == "material_contributor"
-    ]
+    material_stages = sorted(
+        (name for name in selected_stages if stage_results[name]["verdict"] == "material_contributor"),
+        key=lambda name: (-stage_results[name]["_contribution"], STAGE_RANK[name]),
+    )
+    primary_stages: list[str] = []
+    cumulative = Fraction(0)
+    for name in material_stages:
+        primary_stages.append(name)
+        cumulative += stage_results[name]["_contribution"]
+        if cumulative > CUMULATIVE_ISSUE_THRESHOLD:
+            break
+    reached_70 = bool(primary_stages and cumulative > CUMULATIVE_ISSUE_THRESHOLD)
+    cumulative_pct = None if not primary_stages else 100 * float(cumulative)
+
     undetermined_stages = [
         name for name in selected_stages if stage_results[name]["verdict"] == "undetermined"
     ]
@@ -397,10 +448,12 @@ def _summarize_block(
 
     if block_reason is not None:
         verdict, reason = "undetermined", block_reason
-    elif ftu_change is None:
+    elif ftu_change is None or prior_ftu is None or prior_ftu <= 0:
         verdict, reason = "undetermined", "ftu_change_unavailable"
     elif ftu_change >= 0:
         verdict, reason = "no_historical_ftu_dip", "ftu_not_declining_vs_prior_month"
+    elif ftu_change / prior_ftu >= FTU_DIP_THRESHOLD:
+        verdict, reason = "no_material_ftu_dip", "ftu_dip_within_5_percent"
     elif material_stages:
         verdict = "contributors_identified" if not undetermined_stages else "partial_contributors_identified"
         reason = None
@@ -411,6 +464,14 @@ def _summarize_block(
     else:
         verdict, reason = "no_material_funnel_contributor", None
 
+    public_stages = {
+        name: _public_stage(
+            item,
+            selected_as_primary=None if item["verdict"] == "undetermined" else name in primary_stages,
+        )
+        for name, item in stage_results.items()
+    }
+
     return {
         **scope,
         "calendar_adjustment": calendar_meta,
@@ -418,8 +479,11 @@ def _summarize_block(
         "verdict": verdict,
         "reason": reason,
         "material_stages": material_stages,
+        "primary_stages": primary_stages,
+        "cumulative_primary_contribution_pct": cumulative_pct,
+        "primary_coverage_reached_70_pct": reached_70,
         "flags": flags,
-        "stages": stage_results,
+        "stages": public_stages,
         "coverage": coverage,
         "members": members,
         "omitted_member_count": omitted_member_count,
@@ -521,6 +585,7 @@ def _city_block(context: dict, key: str, name: str, selected_stages: tuple[str, 
         scope=_scope("city", label, context["month"], context["prior_month"], [key]),
         calendar_meta=context["calendar_adjustment"],
         ftu_summary=ftu_summary,
+        prior_ftu=p_ftu,
         ftu_change=ftu_change,
         block_reason=block_reason,
         stage_results=stage_results,
@@ -536,6 +601,7 @@ def _compact_member(block: dict) -> dict:
         "ftu_change_pct": block["ftu_change_pct"],
         "verdict": block["verdict"],
         "material_stages": block["material_stages"],
+        "primary_stages": block["primary_stages"],
         "reason": block["reason"],
     }
 
@@ -637,6 +703,7 @@ def _strict_aggregate_block(
         scope=_scope(kind, label, context["month"], context["prior_month"], keys),
         calendar_meta=context["calendar_adjustment"],
         ftu_summary=ftu_summary,
+        prior_ftu=p_ftu,
         ftu_change=ftu_change,
         block_reason=block_reason,
         stage_results=stage_results,
@@ -731,6 +798,7 @@ def _national_block(context: dict, selected_stages: tuple[str, ...]) -> dict:
         scope=_scope("national", "National (matched cities)", context["month"], context["prior_month"], []),
         calendar_meta=context["calendar_adjustment"],
         ftu_summary=ftu_summary,
+        prior_ftu=p_ftu,
         ftu_change=ftu_change,
         block_reason=block_reason,
         stage_results=stage_results,
@@ -776,7 +844,7 @@ def investigate_funnel(
     national: bool = False,
     stages: list[str] | tuple[str, ...] | None = None,
 ) -> dict:
-    """Evaluate FE, FE2RR and RR2Net independently against calendar-adjusted MoM FTU dips."""
+    """Evaluate FE, FE2RR and RR2Net independently against >5% calendar-adjusted MoM FTU dips."""
     selected_stages = validate_funnel_stages(stages)
     available = set(dataset.data["months"]) if available_months is None else set(available_months)
     contexts = [_month_context(dataset, value, available) for value in requested_months]

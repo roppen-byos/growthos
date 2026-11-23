@@ -50,7 +50,7 @@
       "definition": "Number of customers completing their first-ever Rapido ride in the reporting period. A completed ride has dropped status. A customer becomes a Platform FTU only once, regardless of service.",
       "caveats": [
         "Counted independently across services; not the sum of Bike/Link, Auto, and Cab PFTU counts.",
-        "Distinct from Service FTU (SVN), where an existing customer tries another Rapido service for the first time.",
+        "Distinct from SFTU, where an existing customer tries another Rapido service for the first time.",
         "Source platform-new flagging is not independently verified first-dropped-ride proof unless separately certified."
       ]
     },
@@ -72,7 +72,7 @@
       ],
       "definition": "Number of customers whose first-ever completed Rapido ride in the reporting period was on the Bike/Link (`link`) service.",
       "caveats": [
-        "Measures first-ever Rapido ride on Bike/Link (PFTU), not Bike/Link Service FTU (SVN).",
+        "Measures first-ever Rapido ride on Bike/Link (PFTU), not Bike/Link SFTU.",
         "Bike/Link is measured as the single `link` service category under DEC-023, replacing the earlier seven-service membership; the physical source mapping remains uncertified."
       ]
     },
@@ -89,7 +89,7 @@
       "movement_unit": "customers",
       "definition": "Number of customers whose first-ever completed Rapido ride in the reporting period was on Auto.",
       "caveats": [
-        "Measures first-ever Rapido ride on Auto (PFTU), not Auto Service FTU (SVN) from existing Bike or Cab customers."
+        "Measures first-ever Rapido ride on Auto (PFTU), not Auto SFTU from existing Bike or Cab customers."
       ]
     },
     "platform_cab_ftu": {
@@ -105,7 +105,7 @@
       "movement_unit": "customers",
       "definition": "Number of customers whose first-ever completed Rapido ride in the reporting period was on Cab. Cab excludes c2c.",
       "caveats": [
-        "Measures first-ever Rapido ride on Cab (PFTU), not Cab Service FTU (SVN) from existing Bike or Auto customers.",
+        "Measures first-ever Rapido ride on Cab (PFTU), not Cab SFTU from existing Bike or Auto customers.",
         "Excludes c2c, while unselected services still count in independent Platform FTU when platform-new."
       ]
     },
@@ -122,9 +122,9 @@
       "subject_unit": "sessions",
       "display_unit": "sessions",
       "movement_unit": "sessions",
-      "definition": "Fare estimate (FE): when the pickup and drop locations are punched in and prices of all service categories are shown. Stored as the monthly city sum of daily customer maximum unique FE sessions across all customers.",
+      "definition": "Fare estimate (FE): when the pickup and drop locations are punched in and prices of all service categories are shown. Stored as the monthly city sum of daily customer maximum unique FE sessions across the FTU-eligible cohort (days on or before each customer's lifetime first completed platform ride, plus Zero-Transaction customers with no completed ride yet).",
       "caveats": [
-        "Counts all-customer FE sessions (not distinct FE users and not an FTU-eligible-only cohort).",
+        "Counts FTU-eligible FE sessions (not distinct FE users, and excludes repeat-rider days after a customer's first completed platform ride).",
         "Historical months before funnel backfill may have null city rows; nulls remain unavailable, never zero."
       ]
     },
@@ -141,9 +141,9 @@
       "subject_unit": "sessions",
       "display_unit": "sessions",
       "movement_unit": "sessions",
-      "definition": "Request Rapido (RR): selecting a service and requesting a ride. Stored as the monthly city sum of daily unique request sessions across all customers and RF service rows.",
+      "definition": "Request Rapido (RR): selecting a service and requesting a ride. Stored as the monthly city sum of daily unique request sessions across the FTU-eligible cohort and all RF service rows.",
       "caveats": [
-        "Covers all customers across all RF service rows (including services outside Bike, Auto, and Cab).",
+        "Covers the FTU-eligible cohort (on/before first completed platform ride plus Zero-Transaction customers) across all RF service rows (including services outside Bike, Auto, and Cab).",
         "Historical months before funnel backfill may have null city rows; nulls remain unavailable, never zero."
       ]
     },
@@ -160,9 +160,9 @@
       "subject_unit": "rides",
       "display_unit": "rides",
       "movement_unit": "rides",
-      "definition": "Completed (dropped) orders across all customers and RF service rows in the reporting period.",
+      "definition": "Completed (dropped) orders across the FTU-eligible cohort and all RF service rows in the reporting period.",
       "caveats": [
-        "Counts all-customer completed rides, distinct from Platform FTU (first-ever ride customers).",
+        "Counts FTU-eligible completed rides (including same-day subsequent rides on the customer's first-ride day), distinct from Platform FTU (unique first-ever ride customers).",
         "Covers all RF service rows (including services outside Bike, Auto, and Cab)."
       ]
     },
@@ -185,9 +185,9 @@
         "Bike Rated by Women",
         "Bike Lite"
       ],
-      "definition": "Monthly city sum of daily unique Rapido Request (RR) sessions across the approved Bike service family for all customers.",
+      "definition": "Monthly city sum of daily unique Rapido Request (RR) sessions across the approved Bike service family for the FTU-eligible cohort.",
       "caveats": [
-        "Covers all customers across the six approved Bike service aliases including Bike Rated by Women and Bike Lite."
+        "Covers the FTU-eligible cohort across the six approved Bike service aliases including Bike Rated by Women and Bike Lite."
       ]
     },
     "bike_net": {
@@ -210,9 +210,9 @@
         "Bike Rated by Women",
         "Bike Lite"
       ],
-      "definition": "Monthly city sum of completed (dropped) orders across the approved Bike service family for all customers.",
+      "definition": "Monthly city sum of completed (dropped) orders across the approved Bike service family for the FTU-eligible cohort.",
       "caveats": [
-        "Covers all customers across the six approved Bike service aliases including Bike Rated by Women and Bike Lite."
+        "Covers the FTU-eligible cohort across the six approved Bike service aliases including Bike Rated by Women and Bike Lite."
       ]
     },
     "auto_rr": {
@@ -234,9 +234,9 @@
         "Auto Priority",
         "AutoPremium"
       ],
-      "definition": "Monthly city sum of daily unique Rapido Request (RR) sessions across the approved Auto service family for all customers.",
+      "definition": "Monthly city sum of daily unique Rapido Request (RR) sessions across the approved Auto service family for the FTU-eligible cohort.",
       "caveats": [
-        "Covers all customers across the approved Auto service variants."
+        "Covers the FTU-eligible cohort across the approved Auto service variants."
       ]
     },
     "auto_net": {
@@ -259,9 +259,9 @@
         "Auto Priority",
         "AutoPremium"
       ],
-      "definition": "Monthly city sum of completed (dropped) orders across the approved Auto service family for all customers.",
+      "definition": "Monthly city sum of completed (dropped) orders across the approved Auto service family for the FTU-eligible cohort.",
       "caveats": [
-        "Covers all customers across the approved Auto service variants."
+        "Covers the FTU-eligible cohort across the approved Auto service variants."
       ]
     },
     "cab_rr": {
@@ -293,9 +293,9 @@
         "Cab Economy - Airport",
         "Cab Premium Biz"
       ],
-      "definition": "Monthly city sum of daily unique Rapido Request (RR) sessions across the approved Cab service family for all customers.",
+      "definition": "Monthly city sum of daily unique Rapido Request (RR) sessions across the approved Cab service family for the FTU-eligible cohort.",
       "caveats": [
-        "Covers all customers across the approved Cab service variants and excludes c2c."
+        "Covers the FTU-eligible cohort across the approved Cab service variants and excludes c2c."
       ]
     },
     "cab_net": {
@@ -328,9 +328,9 @@
         "Cab Economy - Airport",
         "Cab Premium Biz"
       ],
-      "definition": "Monthly city sum of completed (dropped) orders across the approved Cab service family for all customers.",
+      "definition": "Monthly city sum of completed (dropped) orders across the approved Cab service family for the FTU-eligible cohort.",
       "caveats": [
-        "Covers all customers across the approved Cab service variants and excludes c2c."
+        "Covers the FTU-eligible cohort across the approved Cab service variants and excludes c2c."
       ]
     },
     "i2r": {
@@ -443,7 +443,7 @@
       "formula": "rr / fe_sessions",
       "definition": "Demand metric: how many Fare Estimates (FE) translate into Request Rapido (RR) sessions after checking the price.",
       "caveats": [
-        "Computed from all-customer city-wide RR and FE sessions (not an FTU-eligible-only cohort).",
+        "Computed from FTU-eligible RR and FE sessions (on/before first completed platform ride plus Zero-Transaction customers).",
         "Aggregate approved counts before dividing; never average city ratios."
       ]
     },
@@ -462,7 +462,7 @@
       "formula": "net / rr",
       "definition": "Fulfillment metric: how many Rapido Requests (RR) are actually fulfilled and translate into a dropped order (Net ride).",
       "caveats": [
-        "Computed from all-customer city-wide Net rides and RR sessions; distinct from R2N (Registration-to-PFTU).",
+        "Computed from FTU-eligible Net rides and RR sessions; distinct from R2N (Registration-to-PFTU).",
         "Aggregate approved counts before dividing; never average city ratios."
       ]
     },
@@ -479,7 +479,7 @@
       "numerator": "bike_net",
       "denominator": "bike_rr",
       "formula": "bike_net / bike_rr",
-      "definition": "Bike fulfillment metric: share of Bike Rapido Requests (RR) fulfilled into dropped Bike orders across all customers.",
+      "definition": "Bike fulfillment metric: share of Bike Rapido Requests (RR) fulfilled into dropped Bike orders across the FTU-eligible cohort.",
       "caveats": [
         "Uses the six approved Bike service aliases for both Bike RR and Bike Net; aggregate counts before dividing."
       ]
@@ -497,7 +497,7 @@
       "numerator": "auto_net",
       "denominator": "auto_rr",
       "formula": "auto_net / auto_rr",
-      "definition": "Auto fulfillment metric: share of Auto Rapido Requests (RR) fulfilled into dropped Auto orders across all customers.",
+      "definition": "Auto fulfillment metric: share of Auto Rapido Requests (RR) fulfilled into dropped Auto orders across the FTU-eligible cohort.",
       "caveats": [
         "Uses the approved Auto service family for both Auto RR and Auto Net; aggregate counts before dividing."
       ]
@@ -515,7 +515,7 @@
       "numerator": "cab_net",
       "denominator": "cab_rr",
       "formula": "cab_net / cab_rr",
-      "definition": "Cab fulfillment metric: share of Cab Rapido Requests (RR) fulfilled into dropped Cab orders across all customers.",
+      "definition": "Cab fulfillment metric: share of Cab Rapido Requests (RR) fulfilled into dropped Cab orders across the FTU-eligible cohort.",
       "caveats": [
         "Uses the approved Cab service family (excluding c2c) for both Cab RR and Cab Net; aggregate counts before dividing."
       ]
@@ -658,16 +658,18 @@
       }
     }
   },
+  "excluded_aliases": [
+    "sftu",
+    "service ftu",
+    "ao",
+    "app opens",
+    "net customers"
+  ],
   "glossary_distinctions": {
-    "svn": {
-      "term": "Service FTU (SVN)",
+    "sftu": {
+      "term": "SFTU (Service FTU)",
       "supported_in_v1": false,
-      "definition": "A customer taking a particular Rapido service for the first time, even after completing earlier rides on another Rapido service. GrowthOS V1 service breakdowns measure service PFTU (first-ever Rapido ride), not SVN."
-    },
-    "ao": {
-      "term": "App Opens (AO)",
-      "supported_in_v1": false,
-      "definition": "App opens (AO). Recorded in the business glossary; not currently extracted or stored in irf.facts."
+      "definition": "An existing customer taking a particular Rapido service for the first time after completing earlier rides on another Rapido service. GrowthOS V1 service breakdowns measure service PFTU (first-ever Rapido ride), not SFTU."
     }
   },
   "rules": {

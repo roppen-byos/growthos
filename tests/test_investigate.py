@@ -62,15 +62,15 @@ class InvestigationCalculationTests(unittest.TestCase):
             cities=["Alpha"],
         )
 
-    def test_exact_five_percent_reg_miss_is_excluded_and_just_below_flags_issue(self):
-        # Alpha: reg 1900 vs target 2000 -> exact -5.0% -> no_material_registration_miss
-        # Bravo: reg 1899 vs target 2000 -> -5.05% (< -5%) -> registration_issue (even though contribution is 25.25%)
-        # Charlie: 64-bit precision boundary just below -5% -> registration_issue
+    def test_exact_seventy_percent_contribution_is_excluded_and_just_above_flags_issue(self):
+        # Alpha: reg 1720 vs target 2000 -> effect -140 / gap -200 = exact 70.0% -> below_threshold
+        # Bravo: reg 1719 vs target 2000 -> effect -140.5 / gap -200 = 70.25% (> 70%) -> registration_issue
+        # Charlie: 64-bit precision boundary just above 70% -> registration_issue
         result = report(
             [
-                ("2026-10", "Alpha", "T1", 800, 1900),
-                ("2026-10", "Bravo", "T1", 800, 1899),
-                ("2026-10", "Charlie", "T1", 8 * 10**14, 19 * 10**15 - 1),
+                ("2026-10", "Alpha", "T1", 800, 1720),
+                ("2026-10", "Bravo", "T1", 800, 1719),
+                ("2026-10", "Charlie", "T1", 8 * 10**14, 172 * 10**14 - 1),
             ],
             [plan("2026-10", [
                 ("Alpha", 1000, 2000),
@@ -83,9 +83,9 @@ class InvestigationCalculationTests(unittest.TestCase):
         bravo = only(result, "city", "Bravo")
         charlie = only(result, "city", "Charlie")
         self.assertEqual((alpha["reg_gap_pct"], alpha["contribution_pct"], alpha["verdict"], alpha["reason"]),
-                         (-5.0, 25.0, "no_material_registration_miss", "registration_variance_within_5_percent"))
+                         (-14.0, 70.0, "below_threshold", "contribution_at_or_below_70_percent"))
         self.assertEqual((bravo["reg_gap_pct"], bravo["contribution_pct"], bravo["verdict"], bravo["reason"]),
-                         (-5.05, 25.25, "registration_issue", None))
+                         (-14.05, 70.25, "registration_issue", None))
         self.assertEqual((charlie["verdict"], charlie["reason"]), ("registration_issue", None))
         self.assertEqual(alpha["flags"], [])
         self.assertEqual(result["months"], ["2026-10"])
@@ -159,9 +159,9 @@ class InvestigationCalculationTests(unittest.TestCase):
         tier = only(result, "tier")
         self.assertEqual((tier["registration_effect"], tier["ftu_gap"], tier["contribution_pct"]),
                          (-210.0, -300, 70.0))
-        # Combined reg: 2580 vs 3000 (-14.0%, strictly < -5%) -> registration_issue
-        self.assertEqual((tier["reg_gap"], tier["reg_gap_pct"], tier["verdict"]),
-                         (-420, -14.0, "registration_issue"))
+        # Combined contribution: -210 / -300 = exact 70.0% -> below_threshold
+        self.assertEqual((tier["reg_gap"], tier["reg_gap_pct"], tier["verdict"], tier["reason"]),
+                         (-420, -14.0, "below_threshold", "contribution_at_or_below_70_percent"))
         self.assertEqual(tier["coverage"], {"member_city_count": 2, "blocked_city_count": 0,
                                             "unplanned_city_count": 1})
         self.assertEqual([item["city"] for item in tier["members"]], ["Alpha", "Bravo"])
@@ -258,7 +258,7 @@ class InvestigationCalculationTests(unittest.TestCase):
         self.assertEqual(sorted(blocks), ["2026-09", "2026-10"])
         self.assertEqual(blocks["2026-09"]["reason"], "no_stored_month")
         self.assertEqual((blocks["2026-10"]["verdict"], blocks["2026-10"]["reg_gap_pct"], blocks["2026-10"]["contribution_pct"]),
-                         ("no_material_registration_miss", -5.0, 25.0))
+                         ("below_threshold", -5.0, 25.0))
 
 
 class InvestigationCliTests(unittest.TestCase):
