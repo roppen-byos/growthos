@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 
+from .classification import UNATTRIBUTED_SOURCE_KEYS
 from .contracts import FACT_FIELDS, MAX_FACTS, MAX_MONTHS, checksum, month, validate_data, validate_metadata
 from .errors import reject
 from .evidence import CITY_PAGE_SIZE, status_result, validate_city_offset
@@ -205,14 +206,16 @@ class PostgresStore:
                 validate_metadata(meta)
                 if meta["month"] != value.isoformat()[:7]:
                     reject("STORE_INTEGRITY", "Stored month metadata does not match its key.")
-            cursor.execute("SELECT count(DISTINCT city_key) FROM irf.facts")
+            unattributed = sorted(UNATTRIBUTED_SOURCE_KEYS)
+            cursor.execute("SELECT count(DISTINCT city_key) FROM irf.facts WHERE NOT (city_key = ANY(%s))", (unattributed,))
             count = cursor.fetchone()[0]
             cursor.execute(f"""SELECT city_key, city, tier FROM (
                 SELECT DISTINCT ON (city_key) city_key, city, tier FROM irf.facts
+                WHERE NOT (city_key = ANY(%s))
                 ORDER BY city_key, month DESC
-            ) AS cities ORDER BY city_key LIMIT {CITY_PAGE_SIZE} OFFSET %s""", (city_offset,))
+            ) AS cities ORDER BY city_key LIMIT {CITY_PAGE_SIZE} OFFSET %s""", (unattributed, city_offset))
             cities = [dict(zip(("city_key", "city", "tier"), row)) for row in cursor.fetchall()]
-            cursor.execute("SELECT DISTINCT tier FROM irf.facts ORDER BY tier")
+            cursor.execute("SELECT DISTINCT tier FROM irf.facts WHERE NOT (city_key = ANY(%s)) ORDER BY tier", (unattributed,))
             tiers = [row[0] for row in cursor.fetchall()]
         return status_result(
             months=[r[0].isoformat()[:7] for r in stored],

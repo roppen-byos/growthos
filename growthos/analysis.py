@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from .classification import CANONICAL_CITIES
+from .classification import CANONICAL_CITIES, is_unattributed
 from .contracts import PUBLIC_VOLUMES, RATIOS, TIERS, MonthlyData, previous_month
 from .errors import reject
 # Preserve existing public imports; new callers use the owning modules.
 from .evidence import MISSING_TOTALS_WARNING, TIER_RECLASSIFIED_WARNING, catalog, provenance
+from .evidence import UNATTRIBUTED_SCOPE_WARNING
 from .evidence import TARGET_FACT_OPERANDS_WARNING, TARGET_OPERANDS_WARNING
 from .evidence import target_actual_warning
 from .metrics import ALL_METRICS, aggregate, definitions, group_metrics, number, pair_metrics, quotient
@@ -46,7 +47,9 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
     data, plan = dataset.data, targets.data
     if period not in data["months"] or plan["month"] != period:
         reject("COVERAGE", "Actuals and targets must describe the requested month; no substitute was selected.")
-    actuals = {r["city_key"]: r for r in data["facts"] if r["month"] == period}
+    month_facts = [r for r in data["facts"] if r["month"] == period]
+    unattributed_fact = next((r for r in month_facts if is_unattributed(r["city_key"])), None)
+    actuals = {r["city_key"]: r for r in month_facts if not is_unattributed(r["city_key"])}
     explicit = {r["city_key"]: r for r in plan["rows"] if r["kind"] == "city"}
     fallback = next(r for r in plan["rows"] if r["kind"] == "new_launch")
     overall = next(r for r in plan["rows"] if r["kind"] == "overall")
@@ -57,7 +60,7 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
         explicit = {key: row for key, row in explicit.items() if key in actuals}
     matched_keys = [key for key in sorted(actuals) if key in explicit]
     fallback_keys = [key for key in sorted(actuals) if key not in explicit]
-    observed_rows = [actuals[key] for key in matched_keys] if tier else list(actuals.values())
+    observed_rows = [actuals[key] for key in matched_keys] if tier else month_facts
     observed = observed_target_actuals(observed_rows)
     rows = []
     for key in sorted(set(actuals) if tier else set(actuals) | set(explicit)):
@@ -155,6 +158,8 @@ def _target_evidence(dataset: MonthlyData, targets: TargetMonth, period: str, *,
     if fallback_keys:
         result["warnings"].append("Unplanned actual cities share one New launch fallback target compared with their combined observed Platform FTU; they have no individual target and the fallback is not an allocation, shared budget or launch evidence.")
     skipped_warning = target_actual_warning(observed)
+    if unattributed_fact is not None:
+        result["warnings"].append(UNATTRIBUTED_SCOPE_WARNING)
     if skipped_warning:
         result["warnings"].append(skipped_warning)
     if any(r["actual"] is None for r in rows) or any(
@@ -448,9 +453,10 @@ def compare_overall(
         out_rows.append({"group": "overall", **metrics_output(*compare_groups(before, after))})
         operation = "compare-overall"
     elif group_by == "tier":
-        tiers_to_show = [tier_filter] if tier_filter else [t for t in TIERS if any(m["tier"] == t for m, _, _ in pairs)]
+        named = comparison.named_pairs
+        tiers_to_show = [tier_filter] if tier_filter else [t for t in TIERS if any(m["tier"] == t for m, _, _ in named)]
         for t in tiers_to_show:
-            t_pairs = [p for p in pairs if p[0]["tier"] == t]
+            t_pairs = [p for p in named if p[0]["tier"] == t]
             expected = {m["city_key"] for m, _, _ in t_pairs}
             before = aggregate_observations([prev_r for _, prev_r, _ in t_pairs if prev_r is not None], expected)
             after = aggregate_observations([curr_r for _, _, curr_r in t_pairs if curr_r is not None], expected)
@@ -461,7 +467,7 @@ def compare_overall(
         operation = "compare-tier"
     else:
         ordered_pairs = sorted(
-            pairs,
+            comparison.named_pairs,
             key=lambda pair: (
                 -((pair[2] or {}).get("platform_ftu") or 0),
                 -((pair[1] or {}).get("platform_ftu") or 0),
@@ -498,17 +504,34 @@ def compare_overall(
         "omitted_row_count": omitted_row_count,
         "narrowing": "Use compare --group-by overall|tier|city, rank, funnel, or share-drivers to drill down.",
     }
-    unmapped_rows = [r for r in comparison.period_rows if r["tier"] == "T3" and r["city_key"] not in CANONICAL_CITIES]
+    unmapped_rows = [r for r in comparison.period_rows
+                     if r["tier"] == "T3" and r["city_key"] not in CANONICAL_CITIES
+                     and not is_unattributed(r["city_key"])]
+    unattributed_rows = [r for r in comparison.period_rows if is_unattributed(r["city_key"])]
     result["mapping_impact"] = {
         "unmapped_city_count": len({r["city_key"] for r in unmapped_rows}),
         "fallback_tier": "T3",
+        "unattributed_included_in_overall": bool(unattributed_rows) and group_by == "overall",
         "known_volumes_by_month": {
             m: {metric: sum(r[metric] for r in unmapped_rows if r["month"] == m and r[metric] is not None) for metric in PUBLIC_VOLUMES}
             for m in (prev, curr)
         },
+        **({"unattributed_volumes_by_month": {
+            m: {
+                metric: (
+                    sum(vals)
+                    if (vals := [r[metric] for r in unattributed_rows if r["month"] == m and r[metric] is not None])
+                    else None
+                )
+                for metric in PUBLIC_VOLUMES
+            }
+            for m in (prev, curr)
+        }} if unattributed_rows and group_by == "overall" else {}),
     }
     if unmapped_rows:
         result["warnings"].append("Unmapped cities included in T3 and overall totals; see mapping_impact.")
+    if unattributed_rows:
+        result["warnings"].append(UNATTRIBUTED_SCOPE_WARNING)
     if group_by != "overall" and comparison.reclassified:
         result["warnings"].append(TIER_RECLASSIFIED_WARNING)
     if any(v["absolute_delta"] is None for row in out_rows for v in row["volumes"].values()):
@@ -537,10 +560,11 @@ def rank_cities(
     top_limit = validate_top(top)
     tier_filter = normalize_tier(tier)
     comparison = prepare_comparison(dataset, previous, latest, tier_filter=tier_filter)
-    prev, curr, pairs = comparison.previous, comparison.latest, comparison.pairs
+    prev, curr = comparison.previous, comparison.latest
     rankable = []
     excluded_unavailable = 0
-    for meta, prev_row, curr_row in pairs:
+    excluded_unattributed = sum(is_unattributed(m["city_key"]) for m, _, _ in comparison.all_pairs)
+    for meta, prev_row, curr_row in comparison.named_pairs:
         key, display, c_tier = meta["city_key"], meta["city"], meta["tier"]
         volumes, ratios = compare_pair(prev_row, curr_row)
         if metric in PUBLIC_VOLUMES:
@@ -600,11 +624,14 @@ def rank_cities(
         "row_count": len(selected),
         "total_rankable_city_count": len(rankable),
         "excluded_unavailable_city_count": excluded_unavailable,
+        "excluded_unattributed_city_count": excluded_unattributed,
         "omitted_row_count": max(0, len(rankable) - len(selected)),
         "narrowing": "Pass --tier T1|T2|T3, --top N, or --ascending to refine rankings, or run funnel --city CITY for funnel drivers.",
     }
     if comparison.reclassified:
         result["warnings"].append(TIER_RECLASSIFIED_WARNING)
+    if comparison.has_unattributed:
+        result["warnings"].append(UNATTRIBUTED_SCOPE_WARNING)
     return result
 
 
@@ -692,11 +719,11 @@ def city_funnels(
         columns = list(dict.fromkeys(normalized_cols))
     tier_filter = normalize_tier(tier)
     comparison = prepare_comparison(dataset, previous, latest, tier_filter=tier_filter, cities=cities)
-    prev, curr, pairs = comparison.previous, comparison.latest, comparison.pairs
+    prev, curr = comparison.previous, comparison.latest
     sort_field = _funnel_sort_field(sort_by)
 
     built = []
-    for meta, prev_row, curr_row in pairs:
+    for meta, prev_row, curr_row in comparison.named_pairs:
         key = meta["city_key"]
         volumes, ratios = compare_pair(prev_row, curr_row)
         item = {
@@ -736,6 +763,8 @@ def city_funnels(
     }
     if comparison.reclassified:
         result["warnings"].append(TIER_RECLASSIFIED_WARNING)
+    if comparison.has_unattributed:
+        result["warnings"].append(UNATTRIBUTED_SCOPE_WARNING)
     return result
 
 
@@ -784,7 +813,7 @@ def share_drivers(
     for t in TIERS:
         if tier_filter and t != tier_filter:
             continue
-        t_pairs = [p for p in all_pairs if p[0]["tier"] == t]
+        t_pairs = [p for p in all_pairs if p[0]["tier"] == t and not is_unattributed(p[0]["city_key"])]
         if not t_pairs:
             continue
         t_volumes, t_shares = _service_mix_summary(t_pairs)
@@ -800,7 +829,7 @@ def share_drivers(
         })
 
     city_entries = []
-    for meta, prev_row, curr_row in comparison.pairs:
+    for meta, prev_row, curr_row in comparison.named_pairs:
         key, display, c_tier = meta["city_key"], meta["city"], meta["tier"]
         volumes, ratios = compare_pair(prev_row, curr_row)
         t_delta = volumes[target_vol].absolute_delta
@@ -865,6 +894,8 @@ def share_drivers(
     }
     if comparison.reclassified:
         result["warnings"].append(TIER_RECLASSIFIED_WARNING)
+    if comparison.has_unattributed:
+        result["warnings"].append(UNATTRIBUTED_SCOPE_WARNING)
     if missing_totals:
         result["warnings"].append(MISSING_TOTALS_WARNING)
     return result

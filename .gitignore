@@ -2,3 +2,4 @@
 .venv
 gwos_analyst.egg-info
 __pycache__
+irf.code-workspace

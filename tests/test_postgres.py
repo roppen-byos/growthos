@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
+from growthos.classification import UNATTRIBUTED_SOURCE_KEYS
 from growthos.contracts import FACT_FIELDS, checksum, month, validate_data
 from growthos.errors import GrowthOSError
 from growthos.evidence import CITY_PAGE_SIZE
@@ -50,11 +51,37 @@ class ReaderTests(unittest.TestCase):
                 self.assertLessEqual(len(actual["cities"]), CITY_PAGE_SIZE)
                 calls = cursor.execute.call_args_list
                 self.assertEqual(len(calls), 4)
+                unattributed = sorted(UNATTRIBUTED_SOURCE_KEYS)
+                self.assertEqual(calls[1].args[1], (unattributed,))
                 self.assertIn("DISTINCT ON (city_key)", calls[2].args[0])
                 self.assertIn("ORDER BY city_key, month DESC", calls[2].args[0])
                 self.assertIn(f"LIMIT {CITY_PAGE_SIZE} OFFSET %s", calls[2].args[0])
-                self.assertEqual(calls[2].args[1], (offset,))
+                self.assertEqual(calls[2].args[1], (unattributed, offset))
+                self.assertEqual(calls[3].args[1], (unattributed,))
                 cursor.fetchmany.assert_not_called()
+
+    def test_catalog_excludes_unattributed_sentinel_from_cities_and_tiers(self):
+        raw = demo_payload()
+        raw["facts"] = [r for r in raw["facts"] if r["tier"] != "T3"]
+        for m in raw["months"]:
+            raw["facts"].append({
+                **raw["facts"][0], "month": m, "city_key": "city_not_found",
+                "city": "city_not_found", "tier": "T3", "source_cities": ["city_not_found"],
+            })
+        dataset = validate_data(raw)
+        data = dataset.data
+        metadata = [(month(m["month"]), m, sum(r["month"] == m["month"] for r in data["facts"]))
+                    for m in data["month_metadata"]]
+        connection, cursor = self.connection()
+        cursor.fetchall.side_effect = [metadata, [("harbor", "Harbor", "T1")], [("T1",)]]
+        cursor.fetchone.return_value = (1,)
+        actual = PostgresStore(connection, allow_nonproduction=True).catalog()
+        expected = FixtureReaderStore(dataset).catalog()
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual["city_count"], 1)
+        self.assertEqual([c["city_key"] for c in actual["cities"]], ["harbor"])
+        self.assertEqual(actual["tiers"], ["T1"])  # Sentinel stored as T3 does not create a T3 tier.
+        self.assertEqual(actual["fact_count"], len(data["facts"]))
 
     def test_catalog_rejects_bad_offset_and_corrupt_metadata(self):
         for offset in (-1, True, 2**31, "0"):

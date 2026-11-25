@@ -15,7 +15,7 @@ from __future__ import annotations
 import calendar
 from fractions import Fraction
 
-from .classification import normalize_city_key
+from .classification import is_unattributed, normalize_city_key
 from .contracts import MonthlyData, month, previous_month
 from .errors import reject
 from .evidence import (
@@ -24,9 +24,10 @@ from .evidence import (
     FUNNEL_OVER_EXPLAINED_WARNING,
     FUNNEL_PROXY_WARNING,
     FUNNEL_UNDETERMINED_WARNING,
+    UNATTRIBUTED_SCOPE_WARNING,
     provenance,
 )
-from .selection import FUNNEL_STAGES, validate_funnel_stages
+from .selection import FUNNEL_STAGES, reject_if_unattributed, validate_funnel_stages
 
 MATERIAL_THRESHOLD = Fraction(1, 5)
 CUMULATIVE_ISSUE_THRESHOLD = Fraction(7, 10)
@@ -174,6 +175,7 @@ def _resolve(name: str, catalog: dict[str, str]) -> str:
     raw = (name or "").strip()
     if not raw:
         reject("CITY", "City names must be nonempty.")
+    reject_if_unattributed(raw)
     folded, norm = raw.casefold(), normalize_city_key(raw)
     for key, label in catalog.items():
         if key == folded or label.casefold() == folded:
@@ -1564,7 +1566,8 @@ def _month_context(dataset: MonthlyData, current: str, available: set[str]) -> d
 def _city_catalog(dataset: MonthlyData) -> dict[str, str]:
     catalog: dict[str, str] = {}
     for row in sorted(dataset.data["facts"], key=lambda item: (item["month"], item["city_key"])):
-        catalog[row["city_key"]] = row["city"]
+        if not is_unattributed(row["city_key"]):
+            catalog[row["city_key"]] = row["city"]
     return catalog
 
 
@@ -1593,7 +1596,8 @@ def investigate_funnel(
             blocks.append(_national_block(context, selected_stages))
         if tier is not None:
             tier_keys = sorted(
-                key for key, row in context["current_facts"].items() if row["tier"] == tier
+                key for key, row in context["current_facts"].items()
+                if row["tier"] == tier and not is_unattributed(key)
             )
             blocks.append(
                 _strict_aggregate_block(context, "tier", tier, tier_keys, selected_stages, "no_tier_cities")
@@ -1617,6 +1621,13 @@ def investigate_funnel(
         additions.append(FUNNEL_OVER_EXPLAINED_WARNING)
     if national:
         additions.append(FUNNEL_NATIONAL_MATCHED_WARNING)
+    unattributed = any(
+        is_unattributed(key)
+        for context in contexts
+        for key in set(context["prior_facts"]) | set(context["current_facts"])
+    )
+    if unattributed and (national or tier is not None):
+        additions.append(UNATTRIBUTED_SCOPE_WARNING)
     if any(
         block["verdict"] in ("undetermined", "partial_contributors_identified", "partial_no_material_contributor")
         or any(stage["verdict"] == "undetermined" for stage in block["stages"].values())

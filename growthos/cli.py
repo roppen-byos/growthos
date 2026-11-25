@@ -57,7 +57,7 @@ def parser() -> argparse.ArgumentParser:
     compare_cmd = commands.add_parser("compare", command_name="compare")
     _add_period_args(compare_cmd)
     compare_cmd.add_argument("--group-by", choices=("overall", "tier", "city"), default="overall", help="grouping grain")
-    compare_cmd.add_argument("--tier", help="filter to T1, T2, or T3 (includes unmapped cities)")
+    compare_cmd.add_argument("--tier", help="filter to T1, T2, or T3 (includes named unmapped cities; excludes the unattributed bucket)")
     compare_cmd.add_argument("--city", action="append", default=[], help="repeatable city filter (with --group-by city)")
     compare_cmd.add_argument("--top", type=int, default=25, help="bounded city count when --group-by city")
 

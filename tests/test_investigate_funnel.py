@@ -445,6 +445,32 @@ class FunnelInvestigationCalculationTests(unittest.TestCase):
             self.assertEqual(block["blocking_city_keys"], [])
             self.assertEqual(len(block["members"]), 2)
 
+    def test_tier_scope_excludes_unattributed_city_while_national_keeps_it(self):
+        from growthos.errors import GrowthOSError
+        rows = [
+            ("2026-07", "Alpha", "T3", 1000, 10000, 5000, 4000),
+            ("2026-07", "city_not_found", "T3", None, 5000, 2500, 2000),
+            ("2026-08", "Alpha", "T3", 900, 9500, 4800, 3800),
+            ("2026-08", "city_not_found", "T3", None, 5000, 2500, 2000),
+        ]
+        result = investigate_funnel(dataset(rows), requested_months=["2026-08"],
+                                    tier="T3", national=True)
+        tier_block = only(result, "tier", "T3")
+        self.assertEqual(tier_block["city_keys"], ["alpha"])
+        national = only(result, "national")
+        self.assertEqual(national["coverage"]["platform_ftu"]["matched_city_count"], 1)
+        self.assertEqual(national["coverage"]["fe"]["matched_city_count"], 2)  # Sentinel included nationally.
+        self.assertTrue(any("excluded from tier, city-level, and New launch pool results" in warning
+                            for warning in result["warnings"]))
+        for bad in ("city_not_found", "UNRECOGNIZED_CITY"):
+            with self.assertRaises(GrowthOSError) as caught:
+                investigate_funnel(dataset(rows), requested_months=["2026-08"], cities=[bad])
+            self.assertEqual(caught.exception.code, "CITY")
+            with self.assertRaises(GrowthOSError) as caught:
+                investigate_funnel(dataset(rows), requested_months=["2026-08"],
+                                   groups=[("Mix", ["Alpha", bad])])
+            self.assertEqual(caught.exception.code, "CITY")
+
     def test_national_rolls_up_matched_cities_and_discloses_exclusions(self):
         # Alpha is in Jul+Aug; Charlie appears only in Aug (newly instrumented) -> excluded from matched national.
         rows = [
