@@ -207,11 +207,16 @@ _Registry_: `cab_rr2net`
 The standardized city entity used across reporting after approved city merges (for example Attingal merged into Trivandrum, Guntur into Vijayawada, and Faridabad into Delhi).
 
 **City Tier (T1, T2, T3)**:
-Market classification grouping cities into three tiers; cities absent from the canonical classification map default to T3, with unmapped-city counts disclosed.
+Market classification grouping cities into three tiers; named cities absent from the canonical classification map default to T3, with unmapped-city counts disclosed. The unattributed bucket is not a tier member.
 _Avoid_: T4, Unclassified
 
+**Unattributed City (`city_not_found`)**:
+The geography-less bucket for observations whose location was missing (for example a registration with no city or an install whose pin code did not map), which could belong to any tier.
+_Scope_: National/overall totals only; excluded from tier, city-level, and New Launch pool results, and rejected as an explicit city or group member. Never report a standalone I2R or R2N for this bucket.
+_Avoid_: T3 city, Unrecognized city
+
 **Paired-Month Tier Cohort**:
-For period comparisons, each city is counted in its latest observed tier within the compared month pair, so tier totals still sum to the overall total if a city changes tier across months.
+For period comparisons, each city is counted in its latest observed tier within the compared month pair, so tier totals plus the national-only unattributed bucket sum to the overall total if a city changes tier across months.
 
 **Selected-Month Tier Cohort**:
 For targets and investigation, only the tier stored for the selected month is used, and only plan-matched cities are included. The prior month's stored tier is not required to match.

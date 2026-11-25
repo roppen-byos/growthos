@@ -15,7 +15,8 @@
       "caveats": [
         "Counts app installations, not unique lifetime people.",
         "Do not manufacture monthly distincts by summing shorter-period or channel distinct counts.",
-        "Not a city-level absolute metric: do not rank, shortlist, or compare cities on install counts. Use city installs only directionally, to describe organic-versus-paid movement."
+        "Not a city-level absolute metric: do not rank, shortlist, or compare cities on install counts. Use city installs only directionally, to describe organic-versus-paid movement.",
+        "city_not_found is unattributed geography (no usable location), not a city or a T3 city; it is excluded from tier and city-level results and included only in national/overall totals."
       ]
     },
     "registrations": {
@@ -33,7 +34,8 @@
       "definition": "Number of customers completing their first registration with Rapido in the reporting period. A customer registers only once; reinstalling the app or logging back in does not create another registration.",
       "caveats": [
         "Not AppsFlyer af_reg.",
-        "Current month-scoped extraction ranks records within the selected month and does not by itself prove lifetime-first registration or legacy export parity."
+        "Current month-scoped extraction ranks records within the selected month and does not by itself prove lifetime-first registration or legacy export parity.",
+        "city_not_found is unattributed geography (no usable location), not a city or a T3 city; it is excluded from tier and city-level results and included only in national/overall totals."
       ]
     },
     "platform_ftu": {

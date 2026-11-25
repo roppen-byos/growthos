@@ -8,14 +8,15 @@ for presentation.
 
 from fractions import Fraction
 
-from .classification import normalize_city_key
+from .classification import is_unattributed, normalize_city_key
 from .contracts import MonthlyData
 from .errors import reject
 from .evidence import (
     INVESTIGATION_UNDETERMINED_WARNING, NATIONAL_COVERAGE_WARNING, OVER_EXPLAINED_WARNING,
-    POOLED_WARNING, TIER_EXCLUDED_WARNING, provenance,
+    POOLED_WARNING, TIER_EXCLUDED_WARNING, UNATTRIBUTED_SCOPE_WARNING, provenance,
 )
 from .metrics import target_attainment
+from .selection import reject_if_unattributed
 from .targets import TargetMonth
 
 PRIORITY = Fraction(7, 10)
@@ -154,8 +155,8 @@ def _facts_by_key(facts: list[dict]) -> dict[str, dict]:
 
 
 def _catalog(facts: dict[str, dict], explicit: dict[str, dict]) -> dict[str, str]:
-    names = {key: row["city"] for key, row in explicit.items()}
-    names.update({key: row["city"] for key, row in facts.items()})
+    names = {key: row["city"] for key, row in explicit.items() if not is_unattributed(key)}
+    names.update({key: row["city"] for key, row in facts.items() if not is_unattributed(key)})
     return names
 
 
@@ -163,6 +164,7 @@ def _resolve(name: str, catalogs: list[dict[str, str]]) -> str:
     raw = (name or "").strip()
     if not raw:
         reject("CITY", "City names must be nonempty.")
+    reject_if_unattributed(raw)
     folded, norm = raw.casefold(), normalize_city_key(raw)
     for catalog in catalogs:
         for key, label in catalog.items():
@@ -292,7 +294,8 @@ def _national_block(context: dict) -> dict:
 def _tier_block(context: dict, tier: str) -> tuple[dict, int]:
     explicit = _explicit(context["plan"])
     facts = _facts_by_key(context["facts"])
-    tier_facts = {key: row for key, row in facts.items() if row["tier"] == tier}
+    tier_facts = {key: row for key, row in facts.items()
+                  if row["tier"] == tier and not is_unattributed(key)}
     matched = sorted(key for key in tier_facts if key in explicit)
     excluded = len(tier_facts) - len(matched)
     members = [(key, tier_facts[key]["city"], _member_operands(tier_facts[key], explicit[key]))
@@ -364,7 +367,8 @@ def _city_block(context: dict, key: str, name: str) -> tuple[dict, bool]:
 def _pooled_block(context: dict) -> dict:
     explicit = _explicit(context["plan"])
     fallback = _special(context["plan"], "new_launch")
-    pool = [row for row in context["facts"] if row["city_key"] not in explicit]
+    pool = [row for row in context["facts"]
+            if row["city_key"] not in explicit and not is_unattributed(row["city_key"])]
     ftu_actual, _, _ = _observed(pool, "platform_ftu")
     reg_actual, _, _ = _observed(pool, "registrations")
     ftu_keys = {row["city_key"] for row in pool if row["platform_ftu"] is not None}
@@ -471,6 +475,10 @@ def investigate(
         additions.append(POOLED_WARNING)
     if tier is not None and excluded_total:
         additions.append(TIER_EXCLUDED_WARNING)
+    unattributed = any(is_unattributed(row["city_key"])
+                       for context in months for row in context["facts"])
+    if unattributed and (national or tier is not None or pooled_seen):
+        additions.append(UNATTRIBUTED_SCOPE_WARNING)
     if any(block["verdict"] == "undetermined" for block in blocks):
         additions.append(INVESTIGATION_UNDETERMINED_WARNING)
     for warning in additions:

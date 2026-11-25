@@ -121,18 +121,32 @@ CANONICAL_CITIES: dict[str, tuple[str, str]] = {
 }
 
 
+UNATTRIBUTED_CITY_KEY = "city_not_found"
+UNATTRIBUTED_SOURCE_KEYS = frozenset({UNATTRIBUTED_CITY_KEY, "unrecognized_city"})
+
+
 def normalize_city_key(value: str | None) -> str:
     cleaned = (value or "").strip()
     if not cleaned:
-        return "city_not_found"
+        return UNATTRIBUTED_CITY_KEY
     slugged = _slug(cleaned)
-    if not slugged:
-        return "city_not_found"
+    if not slugged or slugged in UNATTRIBUTED_SOURCE_KEYS:
+        return UNATTRIBUTED_CITY_KEY
     return EXPLICIT_MERGES.get(slugged, slugged)
+
+
+def is_unattributed(city_key: str | None) -> bool:
+    """True only for the geography-less sentinel keys; empty/None is not a city key."""
+    if not isinstance(city_key, str) or not city_key.strip():
+        return False
+    return _slug(city_key) in UNATTRIBUTED_SOURCE_KEYS
 
 
 def resolve_city(canonical_key: str, sample_source_city: str | None = None) -> tuple[str, str, str, list[str]]:
     key = normalize_city_key(canonical_key)
+    if key == UNATTRIBUTED_CITY_KEY:
+        # DB storage uses T3 for the NOT NULL tier column; analyst scopes exclude this sentinel from all tiers.
+        return UNATTRIBUTED_CITY_KEY, UNATTRIBUTED_CITY_KEY, "T3", [UNATTRIBUTED_CITY_KEY]
     if key in CANONICAL_CITIES:
         display, tier = CANONICAL_CITIES[key]
         lineage = list(MERGED_SOURCE_CITIES.get(key, (display,)))

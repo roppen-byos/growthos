@@ -55,6 +55,42 @@ def only(result, kind, label=None):
 
 
 class InvestigationCalculationTests(unittest.TestCase):
+    def test_tier_scope_excludes_unattributed_city_while_national_includes_it(self):
+        rows = [
+            ("2026-10", "Alpha", "T1", 100, 200),
+            ("2026-10", "Beta", "T3", 1000, 2000),
+        ]
+        target_plan = [plan("2026-10", [("Alpha", 100, 200), ("Beta", 1000, 2000)],
+                            overall=(1100, 2700))]
+        result = report(rows + [("2026-10", "city_not_found", "T3", None, 500)],
+                        target_plan, tier="T3", national=True, requested_months=["2026-10"])
+        t3 = only(result, "tier", "T3")
+        self.assertEqual(t3["coverage"]["member_city_count"], 1)
+        self.assertEqual(t3["coverage"]["unplanned_city_count"], 0)  # Not a T3 city.
+        self.assertEqual(t3["reg_actual"], 2000)
+        national = only(result, "national")
+        self.assertEqual(national["reg_actual"], 2700)  # Unattributed included nationally.
+        self.assertTrue(any("excluded from tier, city-level, and New launch pool results" in warning
+                            for warning in result["warnings"]))
+        # Unplanned named city triggers pooled New launch block and still discloses sentinel exclusion.
+        unplanned_res = report(
+            rows + [("2026-10", "Gamma", "T3", 50, 100), ("2026-10", "city_not_found", "T3", None, 500)],
+            target_plan, cities=["Gamma"], requested_months=["2026-10"],
+        )
+        pooled = only(unplanned_res, "new_launch")
+        self.assertEqual(pooled["reg_actual"], 100)  # Sentinel excluded from New launch pool.
+        self.assertTrue(any("excluded from tier, city-level, and New launch pool results" in warning
+                            for warning in unplanned_res["warnings"]))
+        # Explicit --city / --group requests for the unattributed sentinel are rejected.
+        for bad in ("city_not_found", "UNRECOGNIZED_CITY"):
+            with self.assertRaises(GrowthOSError) as caught:
+                report(rows + [("2026-10", "city_not_found", "T3", None, 500)],
+                       target_plan, cities=[bad], requested_months=["2026-10"])
+            self.assertEqual(caught.exception.code, "CITY")
+            with self.assertRaises(GrowthOSError) as caught:
+                report(rows + [("2026-10", "city_not_found", "T3", None, 500)],
+                       target_plan, groups=[("Mix", ["Alpha", bad])], requested_months=["2026-10"])
+            self.assertEqual(caught.exception.code, "CITY")
     def one(self, ftu_actual, reg_actual, *, target=(1000, 2000), tier="T1"):
         return report(
             [("2026-10", "Alpha", tier, ftu_actual, reg_actual)],

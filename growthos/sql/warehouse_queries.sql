@@ -1,7 +1,7 @@
 -- name: installs-monthly
 -- metrics: installs
 WITH mapped AS (
-    SELECT CASE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(m.city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') WHEN 'guntur' THEN 'vijayawada' WHEN 'faridabad' THEN 'delhi' WHEN 'attingal' THEN 'trivandrum' ELSE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(m.city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') END AS canonical_city_key,
+    SELECT CASE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(m.city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') WHEN 'unrecognized_city' THEN 'city_not_found' WHEN 'guntur' THEN 'vijayawada' WHEN 'faridabad' THEN 'delhi' WHEN 'attingal' THEN 'trivandrum' ELSE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(m.city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') END AS canonical_city_key,
            coalesce(nullif(trim(m.city), ''), 'city_not_found') AS source_city,
            i.appsflyer_id
     FROM appsflyer.canonical_appsflyer_customer_install i
@@ -23,7 +23,7 @@ ORDER BY canonical_city_key
 -- name: registrations-monthly
 -- metrics: registrations
 WITH registrations_ranked AS (
-    SELECT CASE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') WHEN 'guntur' THEN 'vijayawada' WHEN 'faridabad' THEN 'delhi' WHEN 'attingal' THEN 'trivandrum' ELSE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') END AS canonical_city_key,
+    SELECT CASE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') WHEN 'unrecognized_city' THEN 'city_not_found' WHEN 'guntur' THEN 'vijayawada' WHEN 'faridabad' THEN 'delhi' WHEN 'attingal' THEN 'trivandrum' ELSE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') END AS canonical_city_key,
            coalesce(nullif(trim(city), ''), 'city_not_found') AS source_city,
            substr(mobile, -10, 10) AS last10,
            row_number() OVER (
@@ -44,7 +44,7 @@ ORDER BY canonical_city_key
 -- name: ftu-monthly
 -- metrics: platform_ftu, platform_link_ftu, platform_auto_ftu, platform_cab_ftu
 WITH mapped AS (
-    SELECT CASE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city_name)), '[^a-z0-9]+', '_')), ''), 'city_not_found') WHEN 'guntur' THEN 'vijayawada' WHEN 'faridabad' THEN 'delhi' WHEN 'attingal' THEN 'trivandrum' ELSE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city_name)), '[^a-z0-9]+', '_')), ''), 'city_not_found') END AS canonical_city_key,
+    SELECT CASE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city_name)), '[^a-z0-9]+', '_')), ''), 'city_not_found') WHEN 'unrecognized_city' THEN 'city_not_found' WHEN 'guntur' THEN 'vijayawada' WHEN 'faridabad' THEN 'delhi' WHEN 'attingal' THEN 'trivandrum' ELSE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city_name)), '[^a-z0-9]+', '_')), ''), 'city_not_found') END AS canonical_city_key,
            coalesce(nullif(trim(city_name), ''), 'city_not_found') AS source_city,
            customer_id,
            lower(trim(service_category)) AS service_key,
@@ -93,7 +93,7 @@ WITH date_bounds AS (
     WHERE day = date_add('day', -1, date(end_day))
     GROUP BY customer_id
 ), city_month AS (
-    SELECT CASE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') WHEN 'guntur' THEN 'vijayawada' WHEN 'faridabad' THEN 'delhi' WHEN 'attingal' THEN 'trivandrum' ELSE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') END AS canonical_city_key,
+    SELECT CASE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') WHEN 'unrecognized_city' THEN 'city_not_found' WHEN 'guntur' THEN 'vijayawada' WHEN 'faridabad' THEN 'delhi' WHEN 'attingal' THEN 'trivandrum' ELSE coalesce(nullif(trim(BOTH '_' FROM regexp_replace(lower(trim(city)), '[^a-z0-9]+', '_')), ''), 'city_not_found') END AS canonical_city_key,
            coalesce(nullif(trim(city), ''), 'city_not_found') AS source_city,
            CAST(coalesce(sum(fe), 0) AS bigint) AS fe_sessions,
            CAST(coalesce(sum(rr), 0) AS bigint) AS rr,

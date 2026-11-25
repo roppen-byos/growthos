@@ -33,7 +33,7 @@ Run this check before interpreting any highlighted I2R or R2N movement as conver
 
 1. Inspect unavailable counts, known subtotals, and `mapping_impact` from `compare`. A ratio built from independently partial numerator/denominator subtotals can mislead — label it partial and stop short of a full-population conversion claim.
 2. Read both operands' absolute and relative movements from `compare`: Registrations and Installs for I2R; Platform FTU and Registrations for R2N.
-3. Run `compare --group-by tier` to localize the shift, including unmapped cities in `T3`.
+3. Run `compare --group-by tier` to localize the shift, including named unmapped cities in `T3` (the unattributed `city_not_found` bucket is national-only and excluded from tiers).
 4. In affected tiers, rank both numerator and denominator in both directions (`rank --metric METRIC --tier Tn --top 5 [--ascending]`), then run `funnel --city CITY ...` on the union of driver cities (reusing master-report JSON when it already covers them).
 5. Synthesize operand and city-mix movement: a falling denominator lifts a ratio even without numerator growth. Separate coverage gaps or unmapped-city volume changes from observed count changes. Never average city ratios, sum city `pp` deltas, or infer operational causes from IRF counts.
 

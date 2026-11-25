@@ -69,14 +69,16 @@ class FixtureReaderStore:
         })
 
     def catalog(self, city_offset: int = 0) -> dict:
+        from growthos.classification import is_unattributed
         from growthos.evidence import CITY_PAGE_SIZE, status_result, validate_city_offset
         validate_city_offset(city_offset)
         data = self._data.data
-        cities = {r["city_key"]: {k: r[k] for k in ("city_key", "city", "tier")} for r in data["facts"]}
+        named = [r for r in data["facts"] if not is_unattributed(r["city_key"])]
+        cities = {r["city_key"]: {k: r[k] for k in ("city_key", "city", "tier")} for r in named}
         return status_result(
             months=data["months"], month_metadata=data["month_metadata"],
             fact_count=len(data["facts"]), cities=[cities[k] for k in sorted(cities)][city_offset:city_offset + CITY_PAGE_SIZE],
-            city_count=len(cities), tiers=sorted({r["tier"] for r in data["facts"]}),
+            city_count=len(cities), tiers=sorted({r["tier"] for r in named}),
             city_offset=city_offset, nonproduction=data["nonproduction"],
         )
 

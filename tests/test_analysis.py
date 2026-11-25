@@ -3,9 +3,9 @@ from decimal import Decimal
 import unittest
 
 from growthos.analysis import catalog, city_funnels, compare_overall, rank_cities, share_drivers
-from growthos.contracts import PUBLIC_VOLUMES, RATIOS, VOLUMES, validate_data
+from growthos.contracts import FUNNEL_VOLUMES, PUBLIC_VOLUMES, RATIOS, VOLUMES, validate_data
 from growthos.errors import GrowthOSError
-from growthos.evidence import MISSING_TOTALS_WARNING, TIER_RECLASSIFIED_WARNING
+from growthos.evidence import MISSING_TOTALS_WARNING, TIER_RECLASSIFIED_WARNING, UNATTRIBUTED_SCOPE_WARNING
 from fixtures import demo_payload, demo_data
 
 
@@ -361,6 +361,99 @@ class AnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(projected["fe2rr_delta_pp"], 10.0)
         self.assertAlmostEqual(projected["rr2net"], 0.75)
         self.assertAlmostEqual(projected["rr2net_delta_pp"], -5.0)
+
+
+class UnattributedCityScopeTests(unittest.TestCase):
+    """city_not_found is geography-less: national only, never a city or a tier member."""
+
+    def dataset(self):
+        raw = demo_payload()
+        for month, installs, registrations in (("2026-09", 100, 200), ("2026-10", 120, 260)):
+            raw["facts"].append({
+                "month": month, "city_key": "city_not_found", "city": "city_not_found",
+                "tier": "T3", "source_cities": ["city_not_found"],
+                **dict.fromkeys(VOLUMES, None), **dict.fromkeys(FUNNEL_VOLUMES, None),
+                "installs": installs, "registrations": registrations,
+            })
+        return validate_data(raw)
+
+    def test_national_overall_includes_unattributed_volumes(self):
+        result = compare_overall(self.dataset())
+        volumes = result["rows"][0]["volumes"]
+        self.assertEqual(volumes["installs"]["latest"]["value"], 420)
+        self.assertEqual(volumes["registrations"]["latest"]["value"], 360)
+        self.assertIn(UNATTRIBUTED_SCOPE_WARNING, result["warnings"])
+        self.assertTrue(result["mapping_impact"]["unattributed_included_in_overall"])
+        self.assertEqual(result["mapping_impact"]["unmapped_city_count"], 1)  # Vale only.
+        self.assertEqual(
+            result["mapping_impact"]["unattributed_volumes_by_month"]["2026-10"]["installs"], 120,
+        )
+        self.assertEqual(
+            result["mapping_impact"]["unattributed_volumes_by_month"]["2026-10"]["registrations"], 260,
+        )
+        self.assertIsNone(
+            result["mapping_impact"]["unattributed_volumes_by_month"]["2026-10"]["platform_ftu"],
+        )
+
+    def test_tier_and_city_scopes_exclude_unattributed_and_warn(self):
+        dataset = self.dataset()
+        tier_all = compare_overall(dataset, group_by="tier")
+        self.assertNotIn("unattributed_volumes_by_month", tier_all["mapping_impact"])
+        self.assertIn(UNATTRIBUTED_SCOPE_WARNING, tier_all["warnings"])
+        tiers = {r["tier"]: r for r in tier_all["rows"]}
+        self.assertEqual(tiers["T3"]["city_count"], 1)  # Vale only; the sentinel is not a T3 city.
+        self.assertEqual(tiers["T3"]["volumes"]["installs"]["latest"]["value"], 100)
+        only_t3 = compare_overall(dataset, group_by="tier", tier="T3")
+        self.assertEqual(only_t3["rows"][0]["city_count"], 1)
+        self.assertIn(UNATTRIBUTED_SCOPE_WARNING, only_t3["warnings"])
+
+        cities_out = compare_overall(dataset, group_by="city")
+        self.assertNotIn("city_not_found", [r["city_key"] for r in cities_out["rows"]])
+        self.assertIn(UNATTRIBUTED_SCOPE_WARNING, cities_out["warnings"])
+
+        for tier_arg in (None, "T3"):
+            ranked = rank_cities(dataset, metric="installs", tier=tier_arg)
+            self.assertNotIn("city_not_found", [r["city_key"] for r in ranked["rows"]])
+            self.assertEqual(ranked["excluded_unattributed_city_count"], 1)
+            self.assertIn(UNATTRIBUTED_SCOPE_WARNING, ranked["warnings"])
+
+            funnels = city_funnels(dataset, tier=tier_arg)
+            self.assertNotIn("city_not_found", [r["city_key"] for r in funnels["rows"]])
+            self.assertIn(UNATTRIBUTED_SCOPE_WARNING, funnels["warnings"])
+
+            drivers = share_drivers(dataset, tier=tier_arg)
+            self.assertNotIn("city_not_found", [r["city_key"] for r in drivers["top_growth_cities"]])
+            self.assertNotIn("city_not_found", [r["city_key"] for r in drivers["top_decline_cities"]])
+            self.assertIn(UNATTRIBUTED_SCOPE_WARNING, drivers["warnings"])
+
+        # Sentinel stored as T3 alone must not invent an empty T3 row in compare --group-by tier or catalog.
+        raw_t1_only = demo_payload()
+        raw_t1_only["facts"] = [r for r in raw_t1_only["facts"] if r["tier"] != "T3"]
+        for m in ("2026-09", "2026-10"):
+            raw_t1_only["facts"].append({
+                "month": m, "city_key": "city_not_found", "city": "city_not_found",
+                "tier": "T3", "source_cities": ["city_not_found"],
+                **dict.fromkeys(VOLUMES, None), **dict.fromkeys(FUNNEL_VOLUMES, None),
+                "installs": 100, "registrations": 200,
+            })
+        t1_dataset = validate_data(raw_t1_only)
+        self.assertEqual([r["tier"] for r in compare_overall(t1_dataset, group_by="tier")["rows"]], ["T1"])
+        cat = catalog(t1_dataset)
+        self.assertEqual(cat["tiers"], ["T1"])
+        self.assertNotIn("city_not_found", [c["city_key"] for c in cat["cities"]])
+
+    def test_explicit_city_requests_for_unattributed_sentinel_are_rejected(self):
+        dataset = self.dataset()
+        for bad in ("city_not_found", "UNRECOGNIZED_CITY"):
+            for call in (
+                lambda b=bad: compare_overall(dataset, group_by="city", cities=[b]),
+                lambda b=bad: city_funnels(dataset, cities=[b]),
+                lambda b=bad: city_funnels(dataset, cities=[b], tier="T3"),
+            ):
+                with self.assertRaises(GrowthOSError) as caught:
+                    call()
+                self.assertEqual(caught.exception.code, "CITY")
+                self.assertIn("national/overall totals only", caught.exception.message)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,10 @@ import unittest
 from datetime import datetime, timezone
 
 from growthos.contracts import MAX_FACTS, RATIOS, VOLUMES, funnel_metrics_sql, month_range, reporting_schema_sql, validate_data
-from growthos.classification import EXPLICIT_MERGES, MERGED_SOURCE_CITIES, normalize_city_key, resolve_city
+from growthos.classification import (
+    EXPLICIT_MERGES, MERGED_SOURCE_CITIES, UNATTRIBUTED_CITY_KEY,
+    is_unattributed, normalize_city_key, resolve_city,
+)
 from growthos.errors import GrowthOSError
 from growthos.metrics import ALL_METRICS, _load_metric_registry, definitions, metric_registry
 from fixtures import demo_payload
@@ -113,6 +116,15 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(resolve_city(key)[2], tier)
         for source, target in (("faridabad", "delhi"), ("guntur", "vijayawada"), ("attingal", "trivandrum")):
             self.assertEqual(resolve_city(source)[0], target)
+        self.assertEqual(normalize_city_key("UNRECOGNIZED_CITY"), UNATTRIBUTED_CITY_KEY)
+        self.assertEqual(
+            resolve_city(UNATTRIBUTED_CITY_KEY, "UNRECOGNIZED_CITY"),
+            (UNATTRIBUTED_CITY_KEY, UNATTRIBUTED_CITY_KEY, "T3", [UNATTRIBUTED_CITY_KEY]),
+        )
+        for unattributed in ("city_not_found", "City Not Found", "UNRECOGNIZED_CITY", "unrecognized_city"):
+            self.assertTrue(is_unattributed(unattributed))
+        for not_unattributed in (None, "", "   ", "---", "delhi", "vale"):
+            self.assertFalse(is_unattributed(not_unattributed))
         self.raw["facts"][0]["tier"] = "T4"
         self.rejects("CITY")
 

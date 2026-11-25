@@ -32,6 +32,8 @@ class WarehouseQueryTests(unittest.TestCase):
         self.assertIn("customer.customer_order_channel_attribution_master", query_sql("ftu-monthly"))
         self.assertIn("hive.datasets.customer_rf_daily_kpi_old_ct", query_sql("funnel-monthly"))
         for entry in queries.values():
+            self.assertIn("WHEN 'unrecognized_city' THEN 'city_not_found'", entry["sql"])
+        for entry in queries.values():
             self.assertEqual(len(entry["checksum"]), 64)
             self.assertNotIn("-- name:", entry["sql"])
             self.assertNotIn("-- metrics:", entry["sql"])

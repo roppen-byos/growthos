@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 
+from .classification import is_unattributed
 from .contracts import MAX_FACTS, MonthlyData
 from .errors import reject
 from .metrics import TargetActualObservation, definitions
@@ -11,6 +12,11 @@ SOURCE_READ_WARNING = "Source-read timestamps describe query execution, not auth
 INDEPENDENT_READ_WARNING = "Independent warehouse reads are not a transactional warehouse view; retained months are fetched independently."
 MISSING_TOTALS_WARNING = "Missing city observations or operands prevent complete totals; known_subtotal is not a total."
 TIER_RECLASSIFIED_WARNING = "City tier assignments changed across compared months; cohorts use each city's latest observed tier in the pair."
+UNATTRIBUTED_SCOPE_WARNING = (
+    "city_not_found is unattributed geography (location missing, so it could belong to any tier), "
+    "not a city or a T3 city; it is included only in national/overall totals and excluded from tier, "
+    "city-level, and New launch pool results."
+)
 TARGET_OPERANDS_WARNING = "Some target or actual operands are unavailable; cities with missing operands cannot qualify. Overall recorded FTU excludes null city FTU values."
 TARGET_FACT_OPERANDS_WARNING = "Some target or actual operands are unavailable; missing city observations remain visible in facts. Overall recorded FTU excludes null city FTU values."
 OVER_EXPLAINED_WARNING = (
@@ -113,7 +119,11 @@ def catalog(dataset: MonthlyData, city_offset: int = 0) -> dict:
     if type(city_offset) is not int or not 0 <= city_offset <= MAX_FACTS:
         reject("BOUNDS", "City catalog offset must be between zero and the fact limit.")
     data = dataset.data
-    cities = {r["city_key"]: (r["city"], r["tier"]) for r in data["facts"]}
+    cities = {
+        r["city_key"]: (r["city"], r["tier"])
+        for r in data["facts"]
+        if not is_unattributed(r["city_key"])
+    }
     page = sorted(cities.items())[city_offset:city_offset + CITY_PAGE_SIZE]
     result = status_result(
         months=data["months"], month_metadata=data["month_metadata"], fact_count=len(data["facts"]),

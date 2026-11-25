@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fractions import Fraction
 from zoneinfo import ZoneInfo
 
-from .classification import normalize_city_key
+from .classification import is_unattributed, normalize_city_key
 from .contracts import (
     BUSINESS_TIMEZONE, MAX_MONTHS, TIERS, MonthlyData, month, month_range, next_month, previous_month,
 )
@@ -33,6 +33,14 @@ class PreparedComparison:
     @property
     def reclassified(self) -> bool:
         return _reclassified(self.pairs)
+
+    @property
+    def has_unattributed(self) -> bool:
+        return any(is_unattributed(meta["city_key"]) for meta, _, _ in self.all_pairs)
+
+    @property
+    def named_pairs(self) -> list[CityPair]:
+        return [p for p in self.pairs if not is_unattributed(p[0]["city_key"])]
 
 
 def prepare_comparison(
@@ -225,15 +233,25 @@ def select_target_facts(rows: list[dict], *, cities: list[str] | None,
     return known + unavailable
 
 
+def reject_if_unattributed(name: str) -> None:
+    if is_unattributed(name):
+        reject(
+            "CITY",
+            "Unattributed geography (city_not_found) is not a city; it is included in national/overall totals only.",
+        )
+
+
 def match_cities(rows: list[dict], requested: list[str]) -> set[str]:
-    by_key = {r["city_key"].casefold(): r["city_key"] for r in rows}
-    by_name = {r["city"].casefold(): r["city_key"] for r in rows}
-    by_norm = {normalize_city_key(r["city_key"]): r["city_key"] for r in rows}
+    named_rows = [r for r in rows if not is_unattributed(r["city_key"])]
+    by_key = {r["city_key"].casefold(): r["city_key"] for r in named_rows}
+    by_name = {r["city"].casefold(): r["city_key"] for r in named_rows}
+    by_norm = {normalize_city_key(r["city_key"]): r["city_key"] for r in named_rows}
     matched = set()
     for item in requested:
         raw = (item or "").strip()
         if not raw:
             continue
+        reject_if_unattributed(raw)
         folded = raw.casefold()
         norm = normalize_city_key(raw)
         key = by_key.get(folded) or by_name.get(folded) or by_norm.get(norm)
@@ -274,7 +292,8 @@ def _filter_pairs(
     pairs: list[CityPair], *, tier_filter: str | None = None, cities: list[str] | None = None,
 ) -> list[CityPair]:
     if tier_filter is not None:
-        pairs = [p for p in pairs if p[0]["tier"] == tier_filter]
+        pairs = [p for p in pairs
+                 if p[0]["tier"] == tier_filter and not is_unattributed(p[0]["city_key"])]
     if cities:
         cohort_rows = [r for _, prev_r, curr_r in pairs for r in (prev_r, curr_r) if r is not None]
         wanted = match_cities(cohort_rows, cities)

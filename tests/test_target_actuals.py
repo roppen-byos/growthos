@@ -2,6 +2,8 @@ import unittest
 
 from growthos.analysis import compare_overall, target_cities, target_facts
 from growthos.contracts import VOLUMES, validate_data
+from growthos.errors import GrowthOSError
+from growthos.evidence import UNATTRIBUTED_SCOPE_WARNING
 from growthos.metrics import observed_target_actuals
 from fixtures import demo_data, demo_payload, demo_targets
 from test_targets import observations, plan
@@ -139,3 +141,47 @@ class TargetActualTests(unittest.TestCase):
         self.assertEqual(targets["overall"]["actual"], 40)
         self.assertEqual(data.payload, before)
         self.assertEqual(target_cities(demo_data(), demo_targets(), "2026-10")["overall"]["actual"], 60)
+
+    def test_unattributed_sentinel_included_in_national_target_actuals_only(self):
+        raw = observations([("Harbor", 100), ("Vale", 50), ("Unplanned", 20), ("city_not_found", 30)]).data
+        for row in raw["facts"]:
+            if row["city_key"] == "harbor":
+                row["tier"] = "T1"
+            else:
+                row["tier"] = "T3"
+        data = validate_data(raw)
+        targets = plan([("Harbor", 120), ("Vale", 100)], overall=300, fallback=50)
+
+        national_analysis = target_cities(data, targets, "2026-10", mode="all")
+        self.assertEqual(national_analysis["overall"]["actual"], 200)  # 100 + 50 + 20 + 30 sentinel
+        self.assertEqual(national_analysis["overall"]["shortfall"], 100)
+        self.assertEqual(national_analysis["coverage"]["actual_city_count"], 3)  # Named cities only.
+        self.assertEqual(national_analysis["fallback"]["city_count"], 1)  # Unplanned only, not sentinel.
+        self.assertEqual(national_analysis["fallback"]["actual"], 20)
+        self.assertNotIn("city_not_found", [r["city_key"] for r in national_analysis["rows"]])
+        self.assertIn(UNATTRIBUTED_SCOPE_WARNING, national_analysis["warnings"])
+
+        national_facts = target_facts(data, targets, "2026-10")
+        self.assertEqual(national_facts["overall"]["actual"], 200)
+        self.assertNotIn("city_not_found", [r["city_key"] for r in national_facts["rows"]])
+        self.assertIn(UNATTRIBUTED_SCOPE_WARNING, national_facts["warnings"])
+
+        tier_t3 = target_cities(data, targets, "2026-10", mode="all", tier="T3")
+        self.assertEqual(tier_t3["overall"]["actual"], 50)  # Plan-matched T3 (Vale) only; no sentinel.
+        self.assertEqual(tier_t3["coverage"]["actual_city_count"], 2)  # Vale + Unplanned; no sentinel.
+        self.assertEqual(tier_t3["fallback"]["actual"], 20)
+        self.assertNotIn("city_not_found", [r["city_key"] for r in tier_t3["rows"]])
+        self.assertIn(UNATTRIBUTED_SCOPE_WARNING, tier_t3["warnings"])
+
+        with self.assertRaises(GrowthOSError) as caught:
+            target_facts(data, targets, "2026-10", cities=["city_not_found"])
+        self.assertEqual(caught.exception.code, "CITY")
+
+        # Sentinel stored as T3 alone does not form a T3 tier cohort.
+        t1_only = validate_data({
+            **raw,
+            "facts": [r for r in raw["facts"] if r["city_key"] in ("harbor", "city_not_found")],
+        })
+        with self.assertRaises(GrowthOSError) as caught:
+            target_cities(t1_only, targets, "2026-10", tier="T3")
+        self.assertEqual(caught.exception.code, "COVERAGE")
