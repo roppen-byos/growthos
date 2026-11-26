@@ -36,7 +36,7 @@ GrowthOS separates the **Assessment Layer (observe / shortlist)** from the **Inv
 
 Steps for a broad investigation request (optionally scoped to a tier) without explicitly named cities:
 
-1. **Resolve one explicit ended month.** Ask if omitted; check `status` if month availability is not yet known in the conversation.
+1. **Resolve one explicit month (ended, or the current month to date).** Ask if omitted; check `status` if month availability is not yet known in the conversation. For a month in `month_to_date`, the CLI compares estimates (`investigate`) or daily run-rates (`investigate-funnel`); follow the IRF analysis skill's Month-to-date months rules for labelling.
 2. **Get the FTU target-miss shortlist (`rows`).** Reuse the current conversation's `target-analysis --month YYYY-MM --mode top|all [--tier T1|T2|T3]` output if already fetched for the same month/mode/checksum, or run it now (default `--mode top`, or `--mode all` if the user requested all misses; load [target-analysis.md](../growthos-irf-analysis/target-analysis.md) for coverage and skipped-null rules).
    - Keep default first-page delivery (`--limit 25`, matching `investigate` / `investigate-funnel`'s 25-city cap per call); never auto-paginate remaining pages unless requested, and disclose `returned / selected_city_count` if `next_offset` is non-null.
    - If the shortlist has `0` cities, report that explicitly (including overall/tier variance and pooled `fallback`) and stop.

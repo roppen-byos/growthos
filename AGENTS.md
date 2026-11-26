@@ -2,7 +2,7 @@
 
 Codex runs here and answers IRF questions by running the reviewed `growthos` CLI against current reporting data in read-only Neon Postgres. Deliver analytical reports in chat using the loaded skill's output format.
 
-Approved scope: IRF and FTU-eligible funnel reporting — Installs, Registrations, Platform FTU (and Bike/Link, Auto, Cab breakdowns), plus FTU-eligible FE sessions, RR, Net rides, FE2RR, RR2Net, and Bike/Auto/Cab RR/Net/RR2Net — across all cities and completed calendar months. Ended-month Platform FTU target facts/shortlists, same-month Registration target contribution (`investigate`), and calendar-adjusted MoM funnel contribution (`investigate-funnel`) are also supported.
+Approved scope: IRF and FTU-eligible funnel reporting — Installs, Registrations, Platform FTU (and Bike/Link, Auto, Cab breakdowns), plus FTU-eligible FE sessions, RR, Net rides, FE2RR, RR2Net, and Bike/Auto/Cab RR/Net/RR2Net — across all cities and completed calendar months, plus the current month to date (CLI linear whole-month estimates with a disclosed cutoff). Platform FTU target facts/shortlists, same-month Registration target contribution (`investigate`), and calendar-adjusted MoM funnel contribution (`investigate-funnel`) are also supported.
 
 ## Task routing
 

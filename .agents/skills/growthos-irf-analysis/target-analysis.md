@@ -1,4 +1,4 @@
-# Ended-Month Platform FTU Targets
+# Platform FTU Targets
 
 Use this reference for Platform FTU target attainment, lookups, coverage shortlists, pooled New launch comparisons, and widening-miss annotations (`target-facts`, `target-analysis`). Reviewed Python tools own all arithmetic, predicates, ordering, reconciliation, and selection.
 
@@ -6,7 +6,7 @@ For diagnosing **why** a city or tier missed its Platform FTU target — includi
 
 ## Workflow
 
-1. **Resolve one explicit ended month.** Extract the month from the question or conversation; if omitted, ask. Use `status` to confirm actual availability (the target command validates target availability). Keep unavailable months explicit without substituting another month or inventing targets. Pass `--tier T1|T2|T3` when the user asks about a specific tier.
+1. **Resolve one explicit month (ended, or the current month to date).** For a month-to-date month, actuals are CLI estimates against the whole-month target; follow the skill's Month-to-date months rules. Extract the month from the question or conversation; if omitted, ask. Use `status` to confirm actual availability (the target command validates target availability). Keep unavailable months explicit without substituting another month or inventing targets. Pass `--tier T1|T2|T3` when the user asks about a specific tier.
 2. **Choose the tool by intent.**
 
    | Objective | Command (`.venv/bin/python -m growthos ...`) |

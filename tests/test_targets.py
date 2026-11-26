@@ -172,6 +172,9 @@ class TargetAnalysisTests(unittest.TestCase):
                      ("2026-10", "all", -1, 25), ("2026-10", "all", 0, True)):
             with self.assertRaises(GrowthOSError):
                 validate_target_request(*args, now=now)
+        validate_target_request("2026-11", "top", 0, 25, now=now, allow_current=True)
+        with self.assertRaises(GrowthOSError):
+            validate_target_request("2026-12", "top", 0, 25, now=now, allow_current=True)
 
     def test_one_time_merged_review_does_not_double_actual(self):
         raw = plan([("Trivandrum", 100)]).data
