@@ -90,16 +90,19 @@ def validate_top(top: int, limit: int = 100) -> int:
     return top
 
 
-def _require_ended(value: str, *, now=None, operation: str = "Target analysis") -> None:
+def _require_ended(value: str, *, now=None, operation: str = "Target analysis", allow_current: bool = False) -> None:
     selected = month(value)
     zone = ZoneInfo(BUSINESS_TIMEZONE)
-    current = (now or datetime.now(timezone.utc)).astimezone(zone)
-    if selected >= current.date().replace(day=1):
-        reject("INCOMPLETE_MONTH", f"{operation} requires an ended calendar month in {BUSINESS_TIMEZONE}.")
+    current = (now or datetime.now(timezone.utc)).astimezone(zone).date().replace(day=1)
+    if selected > current or (selected == current and not allow_current):
+        reject("INCOMPLETE_MONTH", f"{operation} requires an ended calendar month in {BUSINESS_TIMEZONE}"
+               + (" or the stored current month to date." if allow_current else "."))
 
 
-def validate_target_request(value: str, mode: str, offset: int, limit: int, *, now=None) -> None:
-    _require_ended(value, now=now)
+def validate_target_request(value: str, mode: str, offset: int, limit: int, *, now=None,
+                            allow_current: bool = False) -> None:
+    """`allow_current` admits the current month only for a stored month-to-date estimate."""
+    _require_ended(value, now=now, allow_current=allow_current)
     if mode not in ("top", "all"):
         reject("ARGUMENTS", "Target mode must be top or all.")
     if type(offset) is not int or not 0 <= offset <= 2**31 - 1:
@@ -119,8 +122,8 @@ FUNNEL_STAGES = ("fe", "fe2rr", "rr2net")
 
 
 def validate_target_facts_request(value: str, attainment: str, sort_by: str,
-                                  descending: bool, offset: int, limit: int) -> None:
-    validate_target_request(value, "all", offset, limit)
+                                  descending: bool, offset: int, limit: int, *, allow_current: bool = False) -> None:
+    validate_target_request(value, "all", offset, limit, allow_current=allow_current)
     if attainment not in TARGET_ATTAINMENTS:
         reject("ARGUMENTS", "Target attainment must be all, above, at, below or unavailable.")
     if sort_by not in TARGET_FACT_SORTS or type(descending) is not bool:
@@ -143,7 +146,8 @@ def parse_investigation_group(value: str) -> tuple[str, list[str]]:
 
 
 def validate_investigation_request(value: str, cities: list[str], groups: list[tuple[str, list[str]]],
-                                  start: str | None, end: str | None, *, now=None) -> list[str]:
+                                  start: str | None, end: str | None, *, now=None,
+                                  allow_current: bool = False) -> list[str]:
     """Bound the investigation selectors and resolve the requested month list."""
     if (start is None) != (end is None):
         reject("PERIOD", "Supply both --start and --end, or neither.")
@@ -151,7 +155,7 @@ def validate_investigation_request(value: str, cities: list[str], groups: list[t
     if value not in months:
         reject("PERIOD", "--month must lie inside the requested --start/--end range.")
     for item in months:
-        _require_ended(item, now=now, operation="Investigation")
+        _require_ended(item, now=now, operation="Investigation", allow_current=allow_current)
     if len(cities) > INVESTIGATION_MAX_CITIES:
         reject("BOUNDS", f"Request at most {INVESTIGATION_MAX_CITIES} cities; each city is reported separately.")
     if len(groups) > INVESTIGATION_MAX_GROUPS:
@@ -195,9 +199,10 @@ def validate_funnel_investigation_request(
     stages: list[str] | tuple[str, ...] | None = None,
     *,
     now=None,
+    allow_current: bool = False,
 ) -> tuple[list[str], list[str], tuple[str, ...]]:
     """Bound funnel investigation selectors and resolve requested + prior-month reads."""
-    requested = validate_investigation_request(value, cities, groups, start, end, now=now)
+    requested = validate_investigation_request(value, cities, groups, start, end, now=now, allow_current=allow_current)
     selected_stages = validate_funnel_stages(stages)
     required = sorted({item for current in requested for item in (previous_month(current), current)})
     if len(required) > MAX_MONTHS:
@@ -227,7 +232,7 @@ def select_target_facts(rows: list[dict], *, cities: list[str] | None,
     known = [r for r in selected if r[field] is not None]
     unavailable = [r for r in selected if r[field] is None]
     if sort_by == "variance-pct":
-        known.sort(key=lambda r: Fraction(r["variance"], r["target"]), reverse=descending)
+        known.sort(key=lambda r: Fraction(r["variance"]) / r["target"], reverse=descending)
     else:
         known.sort(key=lambda r: r[field], reverse=descending)
     return known + unavailable

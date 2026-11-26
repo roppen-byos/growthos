@@ -7,6 +7,7 @@ import sys
 
 from .analysis import (
     city_funnels,
+    linear_full_month_estimate,
     compare_overall,
     rank_cities,
     share_drivers,
@@ -15,7 +16,7 @@ from .analysis import (
 )
 from .contracts import month_range, previous_month, validate_data
 from .errors import DiagnosticStage, MAX_OUTPUT_BYTES, SafeParser, diagnostic_stage, execute_cli, reject
-from .evidence import provenance
+from .evidence import apply_month_to_date_basis, month_to_date, provenance
 from .funnel_investigation import investigate_funnel
 from .investigation import investigate
 from .metrics import ALL_METRICS
@@ -40,6 +41,8 @@ from .selection import (
 def _add_period_args(command: argparse.ArgumentParser) -> None:
     command.add_argument("--previous", help="YYYY-MM; requires --latest")
     command.add_argument("--latest", help="YYYY-MM; requires --previous")
+    command.add_argument("--raw-month-to-date", action="store_true",
+                         help="report a month-to-date month's raw counts instead of CLI linear whole-month estimates")
 
 
 TARGET_COMMANDS = ("target-analysis", "target-facts")
@@ -96,7 +99,7 @@ def parser() -> argparse.ArgumentParser:
     verify_cmd.add_argument("--end", help="last stored month; requires --start")
 
     target_cmd = commands.add_parser("target-analysis", command_name="target-analysis")
-    target_cmd.add_argument("--month", required=True, help="explicit ended month, YYYY-MM")
+    target_cmd.add_argument("--month", required=True, help="explicit month YYYY-MM: ended, or the current month to date (linear estimate)")
     target_cmd.add_argument("--mode", choices=("top", "all"), default="top", help="overall-shortfall coverage or every qualifying city")
     target_cmd.add_argument("--offset", type=int, default=0, help="page offset after complete selection")
     target_cmd.add_argument("--limit", type=int, default=25, help="page size (1..100); not a selection cap")
@@ -105,7 +108,7 @@ def parser() -> argparse.ArgumentParser:
                             help="matched city targets (default) or the pooled New launch fallback comparison")
 
     facts_cmd = commands.add_parser("target-facts", command_name="target-facts")
-    facts_cmd.add_argument("--month", required=True, help="explicit ended month, YYYY-MM")
+    facts_cmd.add_argument("--month", required=True, help="explicit month YYYY-MM: ended, or the current month to date (linear estimate)")
     facts_cmd.add_argument("--city", action="append", default=[], help="repeatable canonical city/name filter; overall totals stay month-wide")
     facts_cmd.add_argument("--attainment", choices=TARGET_ATTAINMENTS, default="all", help="exact actual-versus-target predicate; no implicit 5%% filter")
     facts_cmd.add_argument("--sort", choices=TARGET_FACT_SORTS, default="city", help="sort field; unavailable values always last")
@@ -115,7 +118,7 @@ def parser() -> argparse.ArgumentParser:
     facts_cmd.add_argument("--tier", help="stored monthly tier T1/T2/T3; totals use assigned targets for its city cohort")
 
     investigate_cmd = commands.add_parser("investigate", command_name="investigate")
-    investigate_cmd.add_argument("--month", required=True, help="explicit ended month, YYYY-MM")
+    investigate_cmd.add_argument("--month", required=True, help="explicit month YYYY-MM: ended, or the current month to date (linear estimate)")
     investigate_cmd.add_argument("--city", action="append", default=[], help="repeatable city; each named city is one independent block")
     investigate_cmd.add_argument("--group", action="append", default=[], help='explicit group as "Label:City,City"; never inferred')
     investigate_cmd.add_argument("--tier", help="stored monthly tier T1/T2/T3 aggregate")
@@ -124,7 +127,7 @@ def parser() -> argparse.ArgumentParser:
     investigate_cmd.add_argument("--end", help="last history month YYYY-MM; requires --start")
 
     funnel_inv_cmd = commands.add_parser("investigate-funnel", command_name="investigate-funnel")
-    funnel_inv_cmd.add_argument("--month", required=True, help="explicit ended month, YYYY-MM")
+    funnel_inv_cmd.add_argument("--month", required=True, help="explicit month YYYY-MM: ended, or the current month to date (linear estimate)")
     funnel_inv_cmd.add_argument("--stage", action="append", default=[], choices=FUNNEL_STAGES,
                                 help="repeatable funnel stage (fe, fe2rr, rr2net); defaults to all three")
     funnel_inv_cmd.add_argument("--city", action="append", default=[], help="repeatable city; each named city is one independent block")
@@ -203,11 +206,14 @@ def run(args) -> dict:
     if args.command == "warehouse-queries":
         return warehouse_output(args.metric, args.query_id)
     investigation = None
+    targets = previous_targets = available = ftu_months = registrations_months = None
     if args.command == "investigate":
         with diagnostic_stage(DiagnosticStage.ARGUMENTS):
             groups = [parse_investigation_group(item) for item in args.group]
             tier = normalize_tier(args.tier)
-            months = validate_investigation_request(args.month, args.city, groups, args.start, args.end)
+            # The current month is admitted only when stored month-to-date (it cannot be stored otherwise).
+            months = validate_investigation_request(args.month, args.city, groups, args.start, args.end,
+                                                    allow_current=True)
             national = args.national or not (args.city or groups or tier)
             if investigation_block_count(months, args.city, groups, tier, national) > INVESTIGATION_MAX_BLOCKS:
                 reject("BOUNDS", "Investigation exceeds the bounded block limit; narrow the months or selectors.")
@@ -217,7 +223,7 @@ def run(args) -> dict:
             groups = [parse_investigation_group(item) for item in args.group]
             tier = normalize_tier(args.tier)
             months, required_months, stages = validate_funnel_investigation_request(
-                args.month, args.city, groups, args.start, args.end, args.stage,
+                args.month, args.city, groups, args.start, args.end, args.stage, allow_current=True,
             )
             national = args.national or not (args.city or groups or tier)
             if funnel_investigation_block_count(months, args.city, groups, tier, national) > INVESTIGATION_MAX_BLOCKS:
@@ -233,11 +239,12 @@ def run(args) -> dict:
     if args.command in TARGET_COMMANDS:
         with diagnostic_stage(DiagnosticStage.ARGUMENTS):
             normalize_tier(args.tier)
+            # The current month is admitted here and accepted later only if stored month-to-date.
             if args.command == "target-analysis":
-                validate_target_request(args.month, args.mode, args.offset, args.limit)
+                validate_target_request(args.month, args.mode, args.offset, args.limit, allow_current=True)
             else:
                 validate_target_facts_request(args.month, args.attainment, args.sort,
-                                               args.descending, args.offset, args.limit)
+                                               args.descending, args.offset, args.limit, allow_current=True)
     with diagnostic_stage(DiagnosticStage.READER):
         with connect_reader() as store:
             if args.command == "status":
@@ -263,36 +270,48 @@ def run(args) -> dict:
                     dataset, targets, previous_targets = load_target_context(store, args.month)
                 else:
                     dataset = store.load(requested_months(args))
-            with diagnostic_stage(DiagnosticStage.ANALYSIS):
-                if args.command == "investigate":
-                    return investigate(
-                        dataset, targets, requested_months=investigation["months"],
-                        available_months=available, ftu_months=ftu_months,
-                        registrations_months=registrations_months, cities=args.city,
-                        groups=investigation["groups"], tier=investigation["tier"],
-                        national=investigation["national"],
-                    )
+                # Month-to-date months: CLI estimates for thresholds, rankings and targets; the funnel
+                # compares daily run-rates exactly; verify and --raw-month-to-date keep raw counts.
+                stored_checksum = dataset.result_checksum
+                partials = month_to_date(dataset.data["month_metadata"])
                 if args.command == "investigate-funnel":
-                    return investigate_funnel(
-                        dataset,
-                        requested_months=investigation["months"],
-                        available_months=available,
-                        cities=args.city,
-                        groups=investigation["groups"],
-                        tier=investigation["tier"],
-                        national=investigation["national"],
-                        stages=investigation["stages"],
-                    )
-                if args.command == "target-analysis":
-                    return target_cities(dataset, targets, args.month, mode=args.mode,
-                                         offset=args.offset, limit=args.limit, tier=args.tier,
-                                         queue=args.queue, previous_targets=previous_targets)
-                if args.command == "target-facts":
-                    return target_facts(dataset, targets, args.month, cities=args.city or None,
-                                        attainment=args.attainment, sort_by=args.sort,
-                                        descending=args.descending, offset=args.offset, limit=args.limit, tier=args.tier,
-                                        previous_targets=previous_targets)
-                return analyze(args, dataset)
+                    basis = "daily_rate"
+                elif args.command == "verify" or getattr(args, "raw_month_to_date", False):
+                    basis = "raw"
+                else:
+                    basis = "estimate"
+                    dataset, _ = linear_full_month_estimate(dataset)
+            with diagnostic_stage(DiagnosticStage.ANALYSIS):
+                return apply_month_to_date_basis(analyze_loaded(
+                    args, dataset, investigation, targets, previous_targets,
+                    available, ftu_months, registrations_months,
+                ), partials, basis, stored_checksum)
+
+
+def analyze_loaded(args, dataset, investigation, targets, previous_targets, available,
+                   ftu_months, registrations_months):
+    if args.command == "investigate":
+        return investigate(
+            dataset, targets, requested_months=investigation["months"],
+            available_months=available, ftu_months=ftu_months,
+            registrations_months=registrations_months, cities=args.city,
+            groups=investigation["groups"], tier=investigation["tier"],
+            national=investigation["national"],
+        )
+    if args.command == "investigate-funnel":
+        return investigate_funnel(
+            dataset, requested_months=investigation["months"], available_months=available,
+            cities=args.city, groups=investigation["groups"], tier=investigation["tier"],
+            national=investigation["national"], stages=investigation["stages"],
+        )
+    if args.command == "target-analysis":
+        return target_cities(dataset, targets, args.month, mode=args.mode, offset=args.offset, limit=args.limit,
+                             tier=args.tier, queue=args.queue, previous_targets=previous_targets)
+    if args.command == "target-facts":
+        return target_facts(dataset, targets, args.month, cities=args.city or None, attainment=args.attainment,
+                            sort_by=args.sort, descending=args.descending, offset=args.offset, limit=args.limit,
+                            tier=args.tier, previous_targets=previous_targets)
+    return analyze(args, dataset)
 
 
 def requested_months(args):

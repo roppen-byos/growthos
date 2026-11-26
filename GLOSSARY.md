@@ -42,8 +42,16 @@ Breaks an FTU drop into what moved at Fare Estimates, request conversion, and co
 ## Reporting & Provenance
 
 **Ended Month**:
-A completed calendar month in `Asia/Kolkata`; the only reportable period. No partial-month, week-to-date, or in-month pacing figures.
-_Avoid_: Current month, MTD
+A completed calendar month in `Asia/Kolkata`; its stored counts are final.
+_Avoid_: Current month
+
+**Month-to-Date (MTD)**:
+The current `Asia/Kolkata` month stored from its first day through a `cutoff_date`, the oldest day every source has landed; its counts are raw observations, not full-month totals.
+_Avoid_: Partial month, current month
+
+**Linear Full-Month Estimate**:
+A month-to-date count multiplied by days in month over days covered, unrounded and computed by the CLI; targets stay whole-month.
+_Avoid_: forecast
 
 **Month-on-Month (MoM)**:
 A comparison of two adjacent months.

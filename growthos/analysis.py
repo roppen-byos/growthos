@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from fractions import Fraction
 
 from .classification import CANONICAL_CITIES, is_unattributed
-from .contracts import PUBLIC_VOLUMES, RATIOS, TIERS, MonthlyData, previous_month
+from .contracts import FUNNEL_VOLUMES, PUBLIC_VOLUMES, RATIOS, TIERS, VOLUMES, MonthlyData, canonical_json, previous_month
 from .errors import reject
 # Preserve existing public imports; new callers use the owning modules.
 from .evidence import MISSING_TOTALS_WARNING, TIER_RECLASSIFIED_WARNING, catalog, provenance
 from .evidence import UNATTRIBUTED_SCOPE_WARNING
 from .evidence import TARGET_FACT_OPERANDS_WARNING, TARGET_OPERANDS_WARNING
-from .evidence import target_actual_warning
+from .evidence import month_to_date, target_actual_warning
 from .metrics import ALL_METRICS, aggregate, definitions, group_metrics, number, pair_metrics, quotient
 from .metrics import (
     GroupRatioComparison, GroupVolumeComparison, aggregate_observations,
@@ -303,12 +304,38 @@ def _persistent_failure(
     return result
 
 
+def linear_full_month_estimate(dataset: MonthlyData, period: str | None = None) -> tuple[MonthlyData, list[dict]]:
+    """Scale month-to-date counts to linear whole-month estimates (one `period`, or every MTD month).
+
+    Estimates stay unrounded (the nearest float to count × days_in_month / days_covered), so the common scale
+    cancels exactly in ratios and shares and service splits still sum to their totals. The returned dataset
+    is an in-memory analysis view, not stored data; callers report the stored checksum.
+    """
+    partials = [m for m in month_to_date(dataset.data["month_metadata"]) if period is None or m["month"] == period]
+    if not partials:
+        return dataset, []
+    factors = {m["month"]: Fraction(m["days_in_month"], m["days_covered"]) for m in partials}
+
+    def scale(row):
+        factor = factors[row["month"]]
+        return {**row, **{k: None if row[k] is None else float(row[k] * factor)
+                          for k in (*VOLUMES, *FUNNEL_VOLUMES)}}
+
+    data = dataset.data
+    view = {**data, "facts": [scale(r) if r["month"] in factors else r for r in data["facts"]]}
+    return MonthlyData(canonical_json(view), dataset.result_checksum), partials
+
+
+def _is_month_to_date(dataset: MonthlyData, period: str) -> bool:
+    return any(m["month"] == period for m in month_to_date(dataset.data["month_metadata"]))
+
+
 def target_cities(dataset: MonthlyData, targets: TargetMonth, period: str, *,
                   mode: str = "top", offset: int = 0, limit: int = 25,
                   tier: str | None = None, queue: str = "matched",
                   previous_targets: TargetMonth | None = None) -> dict:
     """Rank and select one queue: plan-matched city targets, or the New launch fallback."""
-    validate_target_request(period, mode, offset, limit)
+    validate_target_request(period, mode, offset, limit, allow_current=_is_month_to_date(dataset, period))
     if queue not in ("matched", "fallback"):
         reject("ARGUMENTS", "Target analysis queue must be matched or fallback.")
     tier_filter = normalize_tier(tier)
@@ -370,7 +397,8 @@ def target_facts(dataset: MonthlyData, targets: TargetMonth, period: str, *,
                  offset: int = 0, limit: int = 25, tier: str | None = None,
                  previous_targets: TargetMonth | None = None) -> dict:
     """General target observations; no implicit 5% filter or overall-gap stop."""
-    validate_target_facts_request(period, attainment, sort_by, descending, offset, limit)
+    validate_target_facts_request(period, attainment, sort_by, descending, offset, limit,
+                                  allow_current=_is_month_to_date(dataset, period))
     tier_filter = normalize_tier(tier)
     result, rows, counts = _target_evidence(
         dataset, targets, period, tier=tier_filter,

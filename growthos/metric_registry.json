@@ -677,7 +677,7 @@
     }
   },
   "rules": {
-    "reporting_period": "Completed calendar months in Asia/Kolkata; adjacent months are MoM and nonadjacent pairs are period comparisons.",
+    "reporting_period": "Completed Asia/Kolkata calendar months plus, at most, the current month to date; CLI output month_to_date.basis says how a month-to-date month was used. Adjacent months are MoM; nonadjacent pairs are period comparisons.",
     "missing_and_zero_values": "Missing city-month observations or operands remain null (unavailable), never zero. Zero denominators or zero baselines make ratios or growth unavailable while valid absolute deltas remain available.",
     "aggregation": "Sum approved counts across complete cohorts before dividing ratios; never average city ratios or sum monthly unique counts into multi-month distinct totals. Incomplete cohort totals stay null alongside labeled known_subtotal values.",
     "interpretation": "Arithmetic and funnel movements describe observations, not proven marketing, CRM, pricing, or supply causality. Stored month_metadata governs actual extraction provenance."

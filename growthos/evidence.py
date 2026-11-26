@@ -1,9 +1,11 @@
 """Current-read provenance and shared bounded status response formatting."""
 
+import calendar
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from .classification import is_unattributed
-from .contracts import MAX_FACTS, MonthlyData
+from .contracts import BUSINESS_TIMEZONE, MAX_FACTS, MonthlyData, calendar_day
 from .errors import reject
 from .metrics import TargetActualObservation, definitions
 
@@ -64,6 +66,72 @@ FUNNEL_UNDETERMINED_WARNING = (
 CITY_PAGE_SIZE = 25
 
 
+LOW_COVERAGE_DAYS = 7
+MTD_BASIS_TEXT = {
+    "raw": ("counts and count deltas here are raw month-to-date observations, not full-month totals; ratios and "
+            "shares are month-to-date values. Period commands report CLI linear whole-month estimates unless run "
+            "with --raw-month-to-date."),
+    "estimate": ("counts are CLI linear whole-month estimates (month-to-date count × {scale}, unrounded; round only "
+                 "for display) and every delta, growth, ranking and threshold uses them; the scale cancels in ratios "
+                 "and shares, so those equal month-to-date values. Installs and Registrations are monthly distinct "
+                 "counts, so their estimates overstate. Results are estimates, not final."),
+    "daily_rate": ("funnel comparisons treat its {covered} covered days as the month length in the calendar "
+                   "adjustment, an exact daily run-rate comparison; scaled counts and changes (`*_scaled`, "
+                   "`ftu_change`) are in `reference_days` units, not whole-month counts, so cite percentages, shares "
+                   "of the dip and contributions. Conversion rates use raw month-to-date counts. Results are "
+                   "estimates, not final."),
+}
+
+
+def month_to_date(month_metadata: list[dict], *, now: datetime | None = None) -> list[dict]:
+    """Describe stored months that end at a landed cutoff instead of the calendar month end."""
+    zone = ZoneInfo(BUSINESS_TIMEZONE)
+    current_month = (now or datetime.now(timezone.utc)).astimezone(zone).date().replace(day=1)
+    result = []
+    for meta in month_metadata:
+        if "cutoff_date" not in meta:
+            continue
+        cutoff = calendar_day(meta["cutoff_date"])
+        days_in_month = calendar.monthrange(cutoff.year, cutoff.month)[1]
+        result.append({
+            "month": meta["month"], "cutoff_date": meta["cutoff_date"],
+            "days_covered": cutoff.day, "days_in_month": days_in_month,
+            "linear_scale": f"{days_in_month}/{cutoff.day}",
+            "linear_scale_factor": round(days_in_month / cutoff.day, 6),
+            "month_ended": cutoff.replace(day=1) < current_month,
+        })
+    return result
+
+
+def month_to_date_warnings(partial: list[dict], basis: str = "raw") -> list[str]:
+    """One warning per month-to-date month, worded for how this output used its counts."""
+    warnings = []
+    for item in partial:
+        detail = MTD_BASIS_TEXT[basis].format(scale=item["linear_scale"], covered=item["days_covered"])
+        warnings.append(f"{item['month']} is month-to-date through {item['cutoff_date']} ({item['days_covered']} of "
+                        f"{item['days_in_month']} days): {detail}")
+        if item["days_covered"] < LOW_COVERAGE_DAYS:
+            warnings.append(f"{item['month']} covers only {item['days_covered']} days; its linear scale "
+                            f"{item['linear_scale']} makes estimates highly uncertain.")
+        if item["month_ended"]:
+            warnings.append(f"{item['month']} has ended but is still stored month-to-date; refresh it as a complete "
+                            "month for final figures.")
+    return warnings
+
+
+def apply_month_to_date_basis(result: dict, partial: list[dict], basis: str, stored_checksum: str) -> dict:
+    """Reword month-to-date warnings for the basis used and keep the stored-data checksum."""
+    if not partial:
+        return result
+    prefixes = tuple(f"{item['month']} " for item in partial)
+    kept = [w for w in result.get("warnings", []) if not (w.startswith(prefixes) and (
+        "is month-to-date through" in w or " covers only " in w or "still stored month-to-date" in w))]
+    result["warnings"] = kept + month_to_date_warnings(partial, basis)
+    result["month_to_date"] = [{**item, "basis": basis} for item in partial]
+    result["result_checksum"] = stored_checksum
+    return result
+
+
 def target_actual_warning(actual: TargetActualObservation) -> str | None:
     count = actual.skipped_null_ftu_city_count
     if not count:
@@ -80,7 +148,8 @@ def target_actual_warning(actual: TargetActualObservation) -> str | None:
 def provenance(dataset: MonthlyData, *, now: datetime | None = None, data: dict | None = None) -> dict:
     parsed = dataset.data if data is None else data
     current = now or datetime.now(timezone.utc)
-    return {
+    partial = month_to_date(parsed["month_metadata"], now=current)
+    result = {
         "nonproduction": parsed["nonproduction"],
         "result_checksum": dataset.result_checksum,
         "read_at": current.isoformat(),
@@ -88,8 +157,11 @@ def provenance(dataset: MonthlyData, *, now: datetime | None = None, data: dict 
         "month_metadata": parsed["month_metadata"],
         "warnings": (["NONPRODUCTION_SYNTHETIC_DATA"] if parsed["nonproduction"] else []) + [
             CURRENT_DATA_WARNING, SOURCE_READ_WARNING, INDEPENDENT_READ_WARNING,
-        ],
+        ] + month_to_date_warnings(partial),
     }
+    if partial:
+        result["month_to_date"] = partial
+    return result
 
 
 def validate_city_offset(city_offset: int) -> None:
@@ -102,7 +174,9 @@ def status_result(*, months: list[str], month_metadata: list[dict], fact_count: 
                   city_offset: int = 0, nonproduction: bool = False) -> dict:
     """Format an already-bounded catalog page; never fetch or retain all facts."""
     validate_city_offset(city_offset)
+    partial = month_to_date(month_metadata)
     return {
+        **({"month_to_date": [{**item, "basis": "raw"} for item in partial]} if partial else {}),
         "operation": "status", "nonproduction": nonproduction,
         "available_months": months, "month_metadata": month_metadata, "fact_count": fact_count,
         "metrics": definitions(), "tiers": tiers, "city_count": city_count, "cities": cities,
@@ -110,7 +184,7 @@ def status_result(*, months: list[str], month_metadata: list[dict], fact_count: 
         "next_city_offset": city_offset + CITY_PAGE_SIZE if city_offset + CITY_PAGE_SIZE < city_count else None,
         "omitted_city_count": max(0, city_count - len(cities)),
         "narrowing": "Read another city catalog page with status --city-offset OFFSET.",
-        "warnings": [CURRENT_DATA_WARNING, SOURCE_READ_WARNING],
+        "warnings": [CURRENT_DATA_WARNING, SOURCE_READ_WARNING, *month_to_date_warnings(partial)],
     }
 
 

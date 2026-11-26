@@ -44,6 +44,7 @@ Question size controls presentation length, never required evidence collection.
 
 ## Numbers and unavailable values
 
+- For a month-to-date month, label the period with its cutoff (`Nov 2026 est. (MTD 1–25)`) and mark CLI-estimated values **Estimated (linear)**, per the IRF analysis skill.
 - Format integer counts exactly with thousands separators (`1,234,567`); avoid K/M abbreviations unless requested, and label any requested unit explicitly.
 - Display fractional ratios, shares, and growth as percentages; display ratio/share movement as percentage points (`pp`), not relative growth. Respect CLI units: `delta_pp`, `variance_pct`, `rate_delta_pp`, `relative_change_pct`, and `contribution_pct` are already scaled in percentage/pp units — convert raw fractions (`0..1`) only once.
 - Default to two decimal places for percentages and `pp`, consistent within a column. Add decimals when needed so a nonzero movement never rounds to `0.00%` / `0.00pp`. Display rounding never alters CLI thresholds or ordering.

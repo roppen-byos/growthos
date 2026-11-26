@@ -18,6 +18,7 @@ from fractions import Fraction
 from .classification import is_unattributed, normalize_city_key
 from .contracts import MonthlyData, month, previous_month
 from .errors import reject
+from .evidence import month_to_date
 from .evidence import (
     FUNNEL_CALENDAR_SCALING_WARNING,
     FUNNEL_NATIONAL_MATCHED_WARNING,
@@ -138,9 +139,11 @@ def _month_days(period: str) -> int:
     return calendar.monthrange(parsed.year, parsed.month)[1]
 
 
-def _calendar_pair(prior: str, current: str) -> tuple[dict, Fraction, Fraction]:
-    prior_days = _month_days(prior)
-    current_days = _month_days(current)
+def _calendar_pair(prior: str, current: str, covered: dict[str, int] | None = None) -> tuple[dict, Fraction, Fraction]:
+    """Month-to-date months count only their covered days, so the pair compares daily run-rates exactly."""
+    covered = covered or {}
+    prior_days = covered.get(prior, _month_days(prior))
+    current_days = covered.get(current, _month_days(current))
     ref_days = min(prior_days, current_days)
     prior_scale = Fraction(ref_days, prior_days)
     current_scale = Fraction(ref_days, current_days)
@@ -153,6 +156,7 @@ def _calendar_pair(prior: str, current: str) -> tuple[dict, Fraction, Fraction]:
         "prior_scale": float(prior_scale),
         "current_scale": float(current_scale),
         "adjusted": prior_days != current_days,
+        "month_to_date_months": sorted(m for m in (prior, current) if m in covered),
     }
     return meta, prior_scale, current_scale
 
@@ -1547,7 +1551,8 @@ def _national_block(context: dict, selected_stages: tuple[str, ...]) -> dict:
 def _month_context(dataset: MonthlyData, current: str, available: set[str]) -> dict:
     prior = previous_month(current)
     data = dataset.data
-    cal_meta, prior_scale, curr_scale = _calendar_pair(prior, current)
+    covered = {m["month"]: m["days_covered"] for m in month_to_date(data["month_metadata"])}
+    cal_meta, prior_scale, curr_scale = _calendar_pair(prior, current, covered)
     prior_rows = [row for row in data["facts"] if row["month"] == prior]
     curr_rows = [row for row in data["facts"] if row["month"] == current]
     return {
